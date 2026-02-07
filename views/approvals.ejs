@@ -1,0 +1,34 @@
+<h2>Pending Approvals</h2>
+
+<div class="entity">
+  <div class="entity-name">Approvals Queue</div>
+
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th>Week Ending</th>
+        <th>Vendor</th>
+        <th>Project</th>
+        <th>Timesheet Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!rows || rows.length === 0) { %>
+        <tr><td colspan="5" class="muted">No pending approvals.</td></tr>
+      <% } %>
+
+      <% rows.forEach(r => { %>
+        <tr>
+          <td><%= r.WeekEndingDate.toISOString().slice(0,10) %></td>
+          <td><%= r.VendorName %> (<%= r.VendorEmail %>)</td>
+          <td><%= r.ProjectName %></td>
+          <td><span class="pill"><%= r.TimesheetStatus %></span></td>
+          <td>
+            <a class="refresh-button" href="/approvals/<%= r.TimesheetProjectApprovalId %>/view">Review</a>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,56 @@
+<h2>Admin - Projects & Approvers</h2>
+
+<div class="entity-container">
+  <div class="entity-col">
+    <div class="entity">
+      <div class="entity-name">Add / Update Mapping</div>
+
+      <form method="post" action="/admin/projects" class="filter-container">
+        <input name="projectName" placeholder="Project Name (must match vendor entry)" />
+
+        <select name="approverUserId">
+          <option value="">Select Approver...</option>
+          <% approvers.forEach(a => { %>
+            <option value="<%= a.UserId %>"><%= a.DisplayName %> (<%= a.Email %>)</option>
+          <% }) %>
+        </select>
+
+        <button class="btn-primary" type="submit">Save Mapping</button>
+        <a href="/home">Back</a>
+      </form>
+
+      <div class="results-count">
+        Note: Vendor enters ProjectName as free text. Mapping must match exactly.
+      </div>
+    </div>
+  </div>
+
+  <div class="entity-col">
+    <div class="entity">
+      <div class="entity-name">Current Mappings</div>
+
+      <table class="diff-table">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Active</th>
+            <th>Approver</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (!projects || projects.length === 0) { %>
+            <tr><td colspan="3" class="muted">No projects found.</td></tr>
+          <% } %>
+
+          <% projects.forEach(p => { %>
+            <tr>
+              <td><%= p.ProjectName %></td>
+              <td><%= p.IsActive ? 'Yes' : 'No' %></td>
+              <td><%= p.ApproverName ? (p.ApproverName + ' (' + p.ApproverEmail + ')') : 'Not mapped' %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

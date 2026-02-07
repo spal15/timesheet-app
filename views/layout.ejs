@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Timesheet</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+
+  <!-- Fixed Nav (your style) -->
+  <div class="fixed-nav">
+    <a href="/home">Home</a>
+
+    <% if (user && user.Role === 'Vendor') { %>
+      <a href="/timesheets">My Timesheets</a>
+    <% } %>
+
+    <% if (user && (user.Role === 'Approver' || user.Role === 'Admin')) { %>
+      <a href="/approvals">Approvals</a>
+    <% } %>
+
+    <% if (user && user.Role === 'Admin') { %>
+      <a href="/admin/projects">Admin</a>
+    <% } %>
+
+    <% if (user) { %>
+      <span class="back-link right">
+        <%= user.DisplayName %> • <%= user.Email %> • <%= user.Role %>
+      </span>
+    <% } %>
+  </div>
+
+  <main>
+    <%- body %>
+  </main>
+
+</body>
+</html>

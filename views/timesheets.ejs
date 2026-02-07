@@ -1,0 +1,48 @@
+<h2>My Timesheets</h2>
+
+<div class="entity">
+  <div class="entity-name">Create / Open Timesheet</div>
+
+  <form method="get" action="/timesheets/edit" class="filter-container">
+    <input name="weekEnding" placeholder="Week Ending (YYYY-MM-DD) e.g. 2026-02-06" />
+    <button class="btn-primary" type="submit">Open / Create</button>
+    <a href="/home">Back</a>
+  </form>
+
+  <div class="results-count">
+    Tip: Week Ending should be the last day of the week (ex: Friday).
+  </div>
+</div>
+
+<div class="entity">
+  <div class="entity-name">Timesheet History</div>
+
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th>Week Ending</th>
+        <th>Status</th>
+        <th>Total Hours</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!rows || rows.length === 0) { %>
+        <tr>
+          <td colspan="4" class="muted">No timesheets found.</td>
+        </tr>
+      <% } %>
+
+      <% rows.forEach(r => { %>
+        <tr>
+          <td><%= r.WeekEndingDate.toISOString().slice(0,10) %></td>
+          <td><span class="pill"><%= r.Status %></span></td>
+          <td><%= r.TotalHours %></td>
+          <td>
+            <a class="refresh-button" href="/timesheets/edit?weekEnding=<%= r.WeekEndingDate.toISOString().slice(0,10) %>">Open</a>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

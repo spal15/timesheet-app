@@ -1,0 +1,106 @@
+<h2>
+  Timesheet - Week Ending <%= weekEnding %>
+  <span class="pill"><%= status %></span>
+</h2>
+
+<% if (error) { %>
+  <div class="entity error">
+    <div class="entity-name">Error</div>
+    <div class="field-value"><%= error %></div>
+  </div>
+<% } %>
+
+<div class="entity">
+  <div class="entity-name">Entry (One row per day)</div>
+
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Day</th>
+        <th>Project</th>
+        <th>Work Summary</th>
+        <th>ADO Ticket(s)</th>
+        <th>Hours</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% days.forEach((d, idx) => { %>
+        <tr>
+          <td><%= (d.WorkDate instanceof Date ? d.WorkDate.toISOString().slice(0,10) : d.WorkDate) %></td>
+          <td><%= d.DayName %></td>
+
+          <% if (typeof approvalView !== "undefined" && approvalView) { %>
+            <td><%= d.ProjectName || '' %></td>
+            <td><%= d.WorkSummary || '' %></td>
+            <td><%= d.ADOTickets || '' %></td>
+            <td><%= d.Hours %></td>
+          <% } else { %>
+            <td><input type="text" value="<%= d.ProjectName || '' %>"></td>
+            <td><input type="text" value="<%= d.WorkSummary || '' %>"></td>
+            <td><input type="text" value="<%= d.ADOTickets || '' %>"></td>
+            <td><input type="number" step="0.25" min="0" max="24" value="<%= d.Hours %>"></td>
+          <% } %>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <% if (!(typeof approvalView !== "undefined" && approvalView)) { %>
+    <div class="filter-container" style="margin-top:16px;">
+      <button class="btn-secondary" type="button" onclick="save()">Save Draft</button>
+
+      <form method="post" action="/timesheets/<%= timesheetId %>/submit" class="inline-form">
+        <input type="hidden" name="weekEnding" value="<%= weekEnding %>"/>
+        <button class="btn-primary" type="submit">Submit</button>
+      </form>
+
+      <a href="/timesheets" class="back-link">Back</a>
+    </div>
+
+    <script>
+      function save() {
+        const trs = document.querySelectorAll("tbody tr");
+        const ids = <%- JSON.stringify(days.map(x => x.TimesheetDayId)) %>;
+        const rows = [];
+
+        for (let i = 0; i < trs.length; i++) {
+          const tds = trs[i].querySelectorAll("td");
+          rows.push({
+            timesheetDayId: ids[i],
+            projectName: tds[2].querySelector("input").value,
+            workSummary: tds[3].querySelector("input").value,
+            adoTickets:  tds[4].querySelector("input").value,
+            hours:       tds[5].querySelector("input").value
+          });
+        }
+
+        fetch(`/timesheets/<%= timesheetId %>/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ weekEnding: "<%= weekEnding %>", rows })
+        }).then(async (r) => {
+          if (!r.ok) {
+            const j = await r.json().catch(() => null);
+            alert(j?.message || "Save failed");
+            return;
+          }
+          window.location.reload();
+        });
+      }
+    </script>
+  <% } else { %>
+    <div class="filter-container" style="margin-top:16px;">
+      <form method="post" action="/approvals/<%= approvalId %>/approve" class="inline-form">
+        <button class="btn-primary" type="submit">Approve</button>
+      </form>
+
+      <form method="post" action="/approvals/<%= approvalId %>/reject" class="inline-form">
+        <input name="comment" placeholder="Rejection comment (required)" style="min-width:320px"/>
+        <button class="btn-danger" type="submit">Reject</button>
+      </form>
+
+      <a href="/approvals" class="back-link">Back</a>
+    </div>
+  <% } %>
+</div>
