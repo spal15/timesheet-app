@@ -242,3 +242,193 @@ button {
 	color: #555;
 	font-size: 0.95rem;
 }
+
+/* ===== Violet Theme Classes (needed by views) ===== */
+
+/* Fixed violet nav like your portal */
+.fixed-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50px;
+  background: #f1ecff; /* light lavender */
+  border-bottom: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  z-index: 1000;
+  gap: 20px;
+}
+
+.fixed-nav a {
+  color: #4b0082;
+  font-weight: bold;
+  text-decoration: none;
+  margin-right: 15px;
+}
+
+.fixed-nav a:hover {
+  text-decoration: underline;
+}
+
+/* Push page content below fixed nav */
+main {
+  margin-top: 60px;
+}
+
+.back-link {
+  margin-left: auto;
+  background: #e0d7fa;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+/* Violet heading */
+h2 {
+  text-align: center;
+  font-size: 2.2rem;
+  margin-bottom: 30px;
+  color: #4b0082;
+}
+
+/* Entity cards (your violet portal style) */
+.entity-container {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.entity-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.entity {
+  background: #ffffff;
+  border: 1px solid #e3d8f7;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 6px 18px rgba(200, 170, 255, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.entity:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 25px rgba(140, 100, 200, 0.25);
+}
+
+.entity-name {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #6a0dad;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #eae3f5;
+  padding-bottom: 6px;
+}
+
+.key-value {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-top: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+  word-break: break-word;
+}
+
+.field-content {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.field-label {
+  font-weight: 500;
+  color: #7a5cd4;
+}
+
+.field-value {
+  color: #444;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  max-width: 100%;
+}
+
+/* Filter bar / toolbar look */
+.filter-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-bottom: 10px;
+  justify-content: center;
+  align-items: center;
+}
+
+.filter-container select,
+.filter-container input {
+  padding: 10px 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 1rem;
+  min-width: 220px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(140, 90, 255, 0.1);
+}
+
+.results-count {
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+  color: #555;
+}
+
+/* Purple button you referenced */
+.refresh-button {
+  padding: 0.5rem 1rem;
+  background-color: #6a0dad;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-weight: bold;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.3s ease;
+}
+
+.refresh-button:hover {
+  background-color: #4b0a8c;
+}
+
+/* Diff-table look used by our pages */
+.diff-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.diff-table th, .diff-table td {
+  border: 1px solid #ccc;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.diff-table th {
+  background-color: #f3e8ff;
+  font-weight: bold;
+  color: #4b0082;
+}
+
+.diff-table tr:nth-child(even) {
+  background: #fafafa;
+}
+
+/* Responsive */
+@media (max-width: 1000px) {
+  .entity-container { grid-template-columns: 1fr; }
+}
