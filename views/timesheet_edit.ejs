@@ -11,6 +11,10 @@
     </div>
   </div>
 <% } %>
+<div id="saveSuccessAlert" class="alert alert-success" style="display:none;">
+  <div class="alert-title">✅ Saved</div>
+  <div class="alert-body">Your timesheet draft has been saved.</div>
+</div>
 
 <div class="entity">
   <div class="entity-name">Entry (One row per day)</div>
@@ -77,10 +81,57 @@
     </div>
 
     <script>
+
+
       function clearValidationAlert() {
         const el = document.getElementById("validationAlert");
         if (el) el.style.display = "none";
       }
+
+      function showSaveSuccess(message) {
+          const el = document.getElementById("saveSuccessAlert");
+          if (!el) return;
+
+          const body = el.querySelector(".alert-body");
+          if (body) body.textContent = message || "Your timesheet draft has been saved.";
+
+          el.style.display = "block";
+
+          // auto-hide after 3 seconds
+          window.clearTimeout(window.__saveSuccessTimer);
+          window.__saveSuccessTimer = window.setTimeout(() => {
+            el.style.display = "none";
+          }, 3000);
+      }
+
+      function isWeekendDayName(dayName) {
+        const d = String(dayName || "").toLowerCase();
+        return d.startsWith("sat") || d.startsWith("sun");
+      }
+
+      function autoFillWeekends() {
+        const trs = document.querySelectorAll("tbody tr");
+
+        for (const tr of trs) {
+          const dayName = tr.children[1]?.textContent?.trim(); // column 2 = Day
+          if (!isWeekendDayName(dayName)) continue;
+
+          const projectSel = tr.querySelector(".project-select");
+          const summaryInp = tr.querySelector(".work-summary");
+          const adoInp = tr.querySelector(".ado-tickets");
+          const hoursInp = tr.querySelector(".hours");
+
+          // Only autofill if user hasn’t already entered something
+          if (projectSel && !projectSel.value) projectSel.value = "Non-Working";
+          if (summaryInp && !summaryInp.value) summaryInp.value = "Weekend";
+          if (hoursInp && (hoursInp.value === "" || hoursInp.value == null)) hoursInp.value = "0";
+
+          // Recommended: fill ADO for weekends so submit rule "all fields required" passes
+          if (adoInp && !adoInp.value) adoInp.value = "N/A";
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", autoFillWeekends);
 
       function save() {
         const trs = document.querySelectorAll("tbody tr");
@@ -115,11 +166,13 @@
             return;
           }
 
+
           // ✅ After a successful save draft, hide the submit validation error
           clearValidationAlert();
 
-          // keep your existing behavior
-          window.location.reload();
+           // ✅ show success confirmation
+          showSaveSuccess("Saved successfully.");
+
         });
       }
     </script>

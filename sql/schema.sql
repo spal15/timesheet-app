@@ -98,8 +98,8 @@ INSERT INTO dbo.Users (Email, DisplayName, Role) VALUES
 
 INSERT INTO dbo.Projects (ProjectName) VALUES
 ('Violet Support'),
-('NY/NJ Rollout'),
-('E2Value');
+('NY_NJ Rollout'),
+('Non-Working');
 
 INSERT INTO dbo.ProjectApprovers (ProjectId, ApproverUserId)
 SELECT p.ProjectId, u.UserId
@@ -107,6 +107,6 @@ FROM dbo.Projects p
 JOIN dbo.Users u ON u.Email =
   CASE p.ProjectName
     WHEN 'Violet Support' THEN 'lead1@local'
-    WHEN 'NY/NJ Rollout'  THEN 'lead1@local'
-    WHEN 'E2Value'        THEN 'lead2@local'
+    WHEN 'NY_NJ Rollout'  THEN 'lead1@local'
+    WHEN 'Non-Working'        THEN 'lead2@local'
   END;

@@ -59,15 +59,56 @@ async function submitTimesheet(req, res) {
 
   await timesheetService.ensure7Days(timesheetId, weekEnding);
 
-  // ✅ NEW: submit-time field validation (from middleware)
-  // middleware sets: req.validationErrors, req.validatedRows
-  if (req.validationErrors?.length) {
-    const days = await timesheetService.listTimesheetDays(timesheetId);
+  // ✅ Load saved rows + projects once (needed for validation + re-render)
+  const days = await timesheetService.listTimesheetDays(timesheetId);
+  const projects = await projectService.listActiveProjects();
 
-    // Combine errors into one message (your view currently supports `error` string)
+  // ✅ STRICT validation: all days must have Project/Summary/ADO.
+  // ✅ Hours: weekdays > 0, weekends allow 0.
+  const errors = [];
+
+  function isWeekendDay(d) {
+    const dn = String(d.DayName || "").toLowerCase();
+    if (dn) return dn.startsWith("sat") || dn.startsWith("sun");
+
+    // fallback: compute from date if DayName missing
+    const wd = d.WorkDate instanceof Date ? d.WorkDate : new Date(d.WorkDate);
+    const dow = wd.getUTCDay(); // 0=Sun,6=Sat
+    return dow === 0 || dow === 6;
+  }
+
+  for (const d of days) {
+    const dateLabel =
+      (d.WorkDate instanceof Date
+        ? d.WorkDate.toISOString().slice(0, 10)
+        : String(d.WorkDate || ""));
+
+    const project = String(d.ProjectName || "").trim();
+    const summary = String(d.WorkSummary || "").trim();
+    const ado = String(d.ADOTickets || "").trim();
+    const hours = Number(d.Hours);
+
+    if (!project) errors.push(`${dateLabel}: Project is required.`);
+    if (!summary) errors.push(`${dateLabel}: Work Summary is required.`);
+    if (!ado) errors.push(`${dateLabel}: ADO Ticket is required.`);
+
+    const weekend = isWeekendDay(d);
+
+    if (!Number.isFinite(hours)) {
+      errors.push(`${dateLabel}: Hours must be a number.`);
+    } else if (weekend) {
+      // weekends: allow 0 or more
+      if (hours < 0) errors.push(`${dateLabel}: Hours cannot be negative.`);
+    } else {
+      // weekdays: must be > 0
+      if (hours <= 0) errors.push(`${dateLabel}: Hours must be greater than 0 (weekdays).`);
+    }
+  }
+
+  if (errors.length) {
     const msg =
-      "Please fix the following before submitting:\n" +
-      req.validationErrors.map(e => `• ${e}`).join("\n");
+      "Please complete all fields for every day before submitting:\n" +
+      errors.map(e => `• ${e}`).join("\n");
 
     return res.render("timesheet_edit", {
       timesheetId,
@@ -79,10 +120,11 @@ async function submitTimesheet(req, res) {
     });
   }
 
+  // ✅ Continue with your existing mapping + approval creation logic
   const usedProjectNames = await timesheetService.getDistinctUsedProjectNames(timesheetId);
 
+  // With strict validation, this will normally never be empty, but keeping it is fine.
   if (!usedProjectNames.length) {
-    const days = await timesheetService.listTimesheetDays(timesheetId);
     return res.render("timesheet_edit", {
       timesheetId,
       weekEnding,
@@ -96,7 +138,6 @@ async function submitTimesheet(req, res) {
   for (const projectName of usedProjectNames) {
     const mapping = await projectService.getProjectMappingByName(projectName);
     if (!mapping) {
-      const days = await timesheetService.listTimesheetDays(timesheetId);
       return res.render("timesheet_edit", {
         timesheetId,
         weekEnding,

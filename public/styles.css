@@ -485,3 +485,11 @@ h2 {
 .alert-body {
   font-size: 15.5px;             /* ⬆️ readable body text */
 }
+
+/* === Success Alert === */
+.alert-success {
+  background: #e6f4ea;
+  border: 2px solid #a3cfbb;
+  color: #0f5132;
+  box-shadow: 0 6px 14px rgba(25, 135, 84, 0.2);
+}

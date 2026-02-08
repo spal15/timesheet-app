@@ -19,12 +19,7 @@ router.get("/timesheets/edit", requireRole("Vendor"), timesheetController.editTi
 router.post("/timesheets/:id/save", requireRole("Vendor"), timesheetController.saveTimesheet);
 
 // ✅ Submit-only validation
-router.post(
-  "/timesheets/:id/submit",
-  requireRole("Vendor"),
-  submitValidationMiddleware,
-  timesheetController.submitTimesheet
-);
+router.post("/timesheets/:id/submit", requireRole("Vendor"), timesheetController.submitTimesheet);
 
 module.exports = router;
 
