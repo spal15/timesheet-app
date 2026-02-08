@@ -4,8 +4,9 @@ const approvalService = require("../services/approvalService");
 
 async function listMyTimesheets(req, res) {
   const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
-  return res.render("timesheets", { rows });
+  return res.render("timesheets", { rows, error: null, errors: [] });
 }
+
 
 async function editTimesheet(req, res) {
   const weekEnding = String(req.query.weekEnding || "").trim();
@@ -17,11 +18,14 @@ async function editTimesheet(req, res) {
   await timesheetService.ensure7Days(timesheetId, weekEnding);
   const days = await timesheetService.listTimesheetDays(timesheetId);
 
+  const projects = await projectService.listActiveProjects();
+
   return res.render("timesheet_edit", {
     timesheetId,
     weekEnding,
     status: header.Status,
     days,
+    projects,     // ✅ NEW
     error: null
   });
 }
@@ -55,6 +59,26 @@ async function submitTimesheet(req, res) {
 
   await timesheetService.ensure7Days(timesheetId, weekEnding);
 
+  // ✅ NEW: submit-time field validation (from middleware)
+  // middleware sets: req.validationErrors, req.validatedRows
+  if (req.validationErrors?.length) {
+    const days = await timesheetService.listTimesheetDays(timesheetId);
+
+    // Combine errors into one message (your view currently supports `error` string)
+    const msg =
+      "Please fix the following before submitting:\n" +
+      req.validationErrors.map(e => `• ${e}`).join("\n");
+
+    return res.render("timesheet_edit", {
+      timesheetId,
+      weekEnding,
+      status: header.Status,
+      days,
+      projects,
+      error: msg
+    });
+  }
+
   const usedProjectNames = await timesheetService.getDistinctUsedProjectNames(timesheetId);
 
   if (!usedProjectNames.length) {
@@ -64,6 +88,7 @@ async function submitTimesheet(req, res) {
       weekEnding,
       status: header.Status,
       days,
+      projects,
       error: "Nothing to submit. Please enter hours and a Project for at least one day."
     });
   }
@@ -77,6 +102,7 @@ async function submitTimesheet(req, res) {
         weekEnding,
         status: header.Status,
         days,
+        projects,
         error: `Project "${projectName}" is not mapped to an approver. Ask admin to add mapping.`
       });
     }

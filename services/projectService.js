@@ -70,9 +70,21 @@ async function getProjectMappingByName(projectName) {
   return r.recordset[0] || null;
 }
 
+async function listActiveProjects() {
+  const pool = await getPool();
+  const r = await pool.request().query(`
+    SELECT ProjectId, ProjectName
+    FROM dbo.Projects
+    WHERE IsActive=1
+    ORDER BY ProjectName
+  `);
+  return r.recordset;
+}
+
 module.exports = {
   listProjectsWithApprovers,
   listApproverUsers,
   upsertProjectAndApprover,
-  getProjectMappingByName
+  getProjectMappingByName,
+  listActiveProjects
 };

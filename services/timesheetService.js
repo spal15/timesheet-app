@@ -14,20 +14,68 @@ async function listTimesheetsForVendor(vendorUserId) {
   return r.recordset;
 }
 
+/**
+ * Reliable upsert:
+ * - MERGE OUTPUT can return empty recordset in some cases.
+ * - Use SELECT -> INSERT -> SELECT
+ * - Handles race conditions with unique constraint.
+ */
 async function upsertTimesheetHeader(vendorUserId, weekEndingDate) {
   const pool = await getPool();
-  const r = await pool.request()
+
+  // 1) Try read existing
+  const existing = await pool.request()
     .input("VendorUserId", sql.Int, vendorUserId)
     .input("WeekEndingDate", sql.Date, weekEndingDate)
     .query(`
-      MERGE dbo.Timesheets AS t
-      USING (SELECT @VendorUserId AS VendorUserId, @WeekEndingDate AS WeekEndingDate) AS s
-      ON (t.VendorUserId=s.VendorUserId AND t.WeekEndingDate=s.WeekEndingDate)
-      WHEN NOT MATCHED THEN
-        INSERT (VendorUserId, WeekEndingDate, Status) VALUES (s.VendorUserId, s.WeekEndingDate, 'Draft')
-      OUTPUT inserted.TimesheetId;
+      SELECT TOP 1 TimesheetId
+      FROM dbo.Timesheets
+      WHERE VendorUserId=@VendorUserId AND WeekEndingDate=@WeekEndingDate
     `);
-  return Number(r.recordset[0].TimesheetId);
+
+  if (existing.recordset.length > 0) {
+    return Number(existing.recordset[0].TimesheetId);
+  }
+
+  // 2) Insert new (may throw on race due to unique constraint)
+  try {
+    await pool.request()
+      .input("VendorUserId", sql.Int, vendorUserId)
+      .input("WeekEndingDate", sql.Date, weekEndingDate)
+      .query(`
+        INSERT INTO dbo.Timesheets (VendorUserId, WeekEndingDate, Status)
+        VALUES (@VendorUserId, @WeekEndingDate, 'Draft')
+      `);
+  } catch (err) {
+    // If someone inserted same record concurrently, just re-read
+    // SQL Server duplicate key often contains "Cannot insert duplicate key" or error numbers 2601/2627
+    const msg = String(err?.message || "");
+    const code = err?.number;
+
+    const isDup =
+      msg.includes("Cannot insert duplicate key") ||
+      msg.includes("Violation of UNIQUE KEY constraint") ||
+      code === 2601 ||
+      code === 2627;
+
+    if (!isDup) throw err;
+  }
+
+  // 3) Re-read created/existing
+  const created = await pool.request()
+    .input("VendorUserId", sql.Int, vendorUserId)
+    .input("WeekEndingDate", sql.Date, weekEndingDate)
+    .query(`
+      SELECT TOP 1 TimesheetId
+      FROM dbo.Timesheets
+      WHERE VendorUserId=@VendorUserId AND WeekEndingDate=@WeekEndingDate
+    `);
+
+  if (created.recordset.length === 0) {
+    throw new Error("Failed to create or find timesheet header.");
+  }
+
+  return Number(created.recordset[0].TimesheetId);
 }
 
 async function getTimesheetHeader(timesheetId) {

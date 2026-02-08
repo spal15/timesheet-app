@@ -144,6 +144,19 @@ button {
 	margin-top: 12px;
 }
 
+/* === Fix inputs overflowing table cells === */
+.diff-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.diff-table input,
+.diff-table select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;   /* 🔑 THIS is the key */
+}
+
 .table th,
 .table td {
 	border: 1px solid #ddd;
@@ -431,4 +444,44 @@ h2 {
 /* Responsive */
 @media (max-width: 1000px) {
   .entity-container { grid-template-columns: 1fr; }
+}
+
+/* === Error / Validation Messages === */
+.alert {
+  margin: 18px 0;
+  padding: 18px 22px;
+  border-radius: 12px;
+  line-height: 1.6;
+}
+
+.alert-error {
+  background: #fdecea;
+  border: 2px solid #f1aeb5;     /* slightly thicker border */
+  color: #842029;
+  box-shadow: 0 6px 16px rgba(220, 53, 69, 0.2);
+}
+
+.alert-title {
+  font-size: 18px;               /* ⬆️ bigger title */
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.alert-error strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.alert-error ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+.alert-error li {
+  margin: 4px 0;
+}
+
+
+.alert-body {
+  font-size: 15.5px;             /* ⬆️ readable body text */
 }
