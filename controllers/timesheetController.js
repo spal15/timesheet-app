@@ -48,67 +48,119 @@ async function saveTimesheet(req, res) {
 
 async function submitTimesheet(req, res) {
   const timesheetId = Number(req.params.id);
-  const weekEnding = String(req.body.weekEnding || "").trim();
+  const weekEnding = String(req.body?.weekEnding || "").trim();
+  const rows = req.body?.rows || [];
 
-  if (!Number.isFinite(timesheetId)) return res.status(400).send("Invalid timesheet id");
-  if (!weekEnding) return res.status(400).send("weekEnding is required");
+  const wantsJson =
+    req.xhr ||
+    (req.headers.accept || "").includes("application/json") ||
+    (req.headers["content-type"] || "").includes("application/json");
+
+  const fail = (status, message, extra = {}) => {
+    return wantsJson
+      ? res.status(status).json({ ok: false, message, ...extra })
+      : res.status(status).send(message);
+  };
+
+  if (!Number.isFinite(timesheetId)) return fail(400, "Invalid timesheet id");
+  if (!weekEnding) return fail(400, "weekEnding is required");
+
+  if (!Array.isArray(rows) || rows.length !== 7) {
+    return fail(400, "Submit must include 7 rows (one per day).");
+  }
 
   const header = await timesheetService.getTimesheetHeader(timesheetId);
-  if (!header) return res.status(404).send("Timesheet not found");
-  if (!["Draft", "Rejected"].includes(header.Status)) return res.status(400).send("Timesheet cannot be submitted.");
+  if (!header) return fail(404, "Timesheet not found");
+  if (!["Draft", "Rejected"].includes(header.Status)) return fail(400, "Timesheet cannot be submitted.");
 
   await timesheetService.ensure7Days(timesheetId, weekEnding);
 
-  // ✅ Load saved rows + projects once (needed for validation + re-render)
+  // Load DB days to ensure timesheetDayIds are valid and to infer dayName/weekend
   const days = await timesheetService.listTimesheetDays(timesheetId);
+
+  // Needed for non-JSON re-render
   const projects = await projectService.listActiveProjects();
 
-  // ✅ STRICT validation: all days must have Project/Summary/ADO.
-  // ✅ Hours: weekdays > 0, weekends allow 0.
-  const errors = [];
+  // Build lookup for TimesheetDayId -> { DayName, WorkDate }
+  const dayById = new Map(
+    days.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
+  );
 
-  function isWeekendDay(d) {
-    const dn = String(d.DayName || "").toLowerCase();
+  // Ensure every row has a valid timesheetDayId (prevents updating wrong or missing row)
+  const badId = rows.find(r => !Number.isFinite(Number(r.timesheetDayId)) || !dayById.has(Number(r.timesheetDayId)));
+  if (badId) {
+    const msg = "Submit payload is missing a valid timesheetDayId for one or more rows. Please refresh the page and try again.";
+    if (wantsJson) return res.status(400).json({ ok: false, message: msg });
+    return res.render("timesheet_edit", {
+      timesheetId,
+      weekEnding,
+      status: header.Status,
+      days,
+      projects,
+      error: msg
+    });
+  }
+
+  function isWeekendFromDayName(dayName) {
+    const dn = String(dayName || "").toLowerCase();
     if (dn) return dn.startsWith("sat") || dn.startsWith("sun");
+    return false;
+  }
 
-    // fallback: compute from date if DayName missing
-    const wd = d.WorkDate instanceof Date ? d.WorkDate : new Date(d.WorkDate);
+  function isWeekendFromDate(workDate) {
+    const wd = workDate instanceof Date ? workDate : new Date(workDate);
     const dow = wd.getUTCDay(); // 0=Sun,6=Sat
     return dow === 0 || dow === 6;
   }
 
-  for (const d of days) {
-    const dateLabel =
-      (d.WorkDate instanceof Date
-        ? d.WorkDate.toISOString().slice(0, 10)
-        : String(d.WorkDate || ""));
+  function autofillWeekendDefaults(r) {
+    r.projectName = String(r.projectName || "").trim() || "Non-Working";
+    r.workSummary = String(r.workSummary || "").trim() || "Weekend";
+    if (r.hours === "" || r.hours == null) r.hours = "0";
+    r.adoTickets = String(r.adoTickets || "").trim() || "N/A";
+  }
 
-    const project = String(d.ProjectName || "").trim();
-    const summary = String(d.WorkSummary || "").trim();
-    const ado = String(d.ADOTickets || "").trim();
-    const hours = Number(d.Hours);
+  // ✅ Validate based on user-entered rows (but enriched with DB day info)
+  const errors = [];
 
-    if (!project) errors.push(`${dateLabel}: Project is required.`);
-    if (!summary) errors.push(`${dateLabel}: Work Summary is required.`);
-    if (!ado) errors.push(`${dateLabel}: ADO Ticket is required.`);
+  rows.forEach((r, idx) => {
+    const id = Number(r.timesheetDayId);
+    const dayInfo = dayById.get(id);
 
-    const weekend = isWeekendDay(d);
+    // If client didn't send dayName, infer it from DB
+    const dayName = String(r.dayName || dayInfo?.DayName || "");
+    const weekend = isWeekendFromDayName(dayName) || isWeekendFromDate(dayInfo?.WorkDate);
+
+    // Autofill weekends if user left blank (optional behavior)
+    if (weekend) autofillWeekendDefaults(r);
+
+    const rowLabel = `Row ${idx + 1}${dayName ? ` (${dayName})` : ""}`;
+
+    const project = String(r.projectName || "").trim();
+    const summary = String(r.workSummary || "").trim();
+    const ado = String(r.adoTickets || "").trim();
+    const hours = Number(r.hours);
+
+    if (!project) errors.push(`${rowLabel}: Project is required.`);
+    if (!summary) errors.push(`${rowLabel}: Work Summary is required.`);
+    if (!ado) errors.push(`${rowLabel}: ADO Ticket is required.`);
 
     if (!Number.isFinite(hours)) {
-      errors.push(`${dateLabel}: Hours must be a number.`);
+      errors.push(`${rowLabel}: Hours must be a number.`);
     } else if (weekend) {
-      // weekends: allow 0 or more
-      if (hours < 0) errors.push(`${dateLabel}: Hours cannot be negative.`);
+      if (hours < 0) errors.push(`${rowLabel}: Hours cannot be negative.`);
+      // weekend allows 0
     } else {
-      // weekdays: must be > 0
-      if (hours <= 0) errors.push(`${dateLabel}: Hours must be greater than 0 (weekdays).`);
+      if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0 (weekdays).`);
     }
-  }
+  });
 
   if (errors.length) {
     const msg =
       "Please complete all fields for every day before submitting:\n" +
       errors.map(e => `• ${e}`).join("\n");
+
+    if (wantsJson) return res.status(400).json({ ok: false, message: msg, errors });
 
     return res.render("timesheet_edit", {
       timesheetId,
@@ -120,31 +172,25 @@ async function submitTimesheet(req, res) {
     });
   }
 
-  // ✅ Continue with your existing mapping + approval creation logic
-  const usedProjectNames = await timesheetService.getDistinctUsedProjectNames(timesheetId);
+  // ✅ Persist what user entered (and weekend autofill updates) before submit
+  await timesheetService.updateTimesheetDaysEditable(timesheetId, rows);
 
-  // With strict validation, this will normally never be empty, but keeping it is fine.
-  if (!usedProjectNames.length) {
-    return res.render("timesheet_edit", {
-      timesheetId,
-      weekEnding,
-      status: header.Status,
-      days,
-      projects,
-      error: "Nothing to submit. Please enter hours and a Project for at least one day."
-    });
-  }
+  // ✅ Approvals from submitted rows
+  const usedProjectNames = [...new Set(rows.map(r => String(r.projectName || "").trim()).filter(Boolean))];
 
   for (const projectName of usedProjectNames) {
     const mapping = await projectService.getProjectMappingByName(projectName);
     if (!mapping) {
+      const msg = `Project "${projectName}" is not mapped to an approver. Ask admin to add mapping.`;
+      if (wantsJson) return res.status(400).json({ ok: false, message: msg });
+
       return res.render("timesheet_edit", {
         timesheetId,
         weekEnding,
         status: header.Status,
         days,
         projects,
-        error: `Project "${projectName}" is not mapped to an approver. Ask admin to add mapping.`
+        error: msg
       });
     }
   }
@@ -159,6 +205,7 @@ async function submitTimesheet(req, res) {
   await timesheetService.markSubmitted(timesheetId);
   await timesheetService.addAudit(timesheetId, req.user.UserId, "Submitted");
 
+  if (wantsJson) return res.json({ ok: true });
   return res.redirect("/timesheets");
 }
 

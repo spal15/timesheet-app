@@ -16,6 +16,8 @@
   <div class="alert-body">Your timesheet draft has been saved.</div>
 </div>
 
+<div id="validationBox" class="validation-box" style="display:none;"></div>
+
 <div class="entity">
   <div class="entity-name">Entry (One row per day)</div>
 
@@ -72,10 +74,10 @@
     <div class="filter-container" style="margin-top:16px;">
       <button class="btn-secondary" type="button" onclick="save()">Save Draft</button>
 
-      <form method="post" action="/timesheets/<%= timesheetId %>/submit" class="inline-form">
-        <input type="hidden" name="weekEnding" value="<%= weekEnding %>"/>
-        <button class="btn-primary" type="submit">Submit</button>
-      </form>
+      <button id="btnSubmit" class="btn-primary" type="button" onclick="submitTimesheet(<%= timesheetId %>)">
+        Submit
+      </button>
+
 
       <a href="/timesheets" class="back-link">Back</a>
     </div>
@@ -133,6 +135,278 @@
 
       document.addEventListener("DOMContentLoaded", autoFillWeekends);
 
+      function collectRowsFromUI() {
+        const trs = document.querySelectorAll("tbody tr");
+        const ids = <%- JSON.stringify(days.map(x => x.TimesheetDayId)) %>;
+        const rows = [];
+
+        for (let i = 0; i < trs.length; i++) {
+          const tr = trs[i];
+          rows.push({
+            timesheetDayId: ids[i],
+            dayName: tr.children[1]?.textContent?.trim() || "", // for weekend rule
+            projectName: tr.querySelector(".project-select")?.value || "",
+            workSummary: tr.querySelector(".work-summary")?.value || "",
+            adoTickets: tr.querySelector(".ado-tickets")?.value || "",
+            hours: tr.querySelector(".hours")?.value || ""
+          });
+        }
+        return rows;
+      }
+
+      function validateRowsClient(rows) {
+        const errors = [];
+
+        function isWeekend(dayName) {
+          const d = String(dayName || "").toLowerCase();
+          return d.startsWith("sat") || d.startsWith("sun");
+        }
+
+        rows.forEach((r, idx) => {
+          const rowLabel = `Row ${idx + 1} (${r.dayName || "Day"})`;
+
+          const project = String(r.projectName || "").trim();
+          const summary = String(r.workSummary || "").trim();
+          const ado = String(r.adoTickets || "").trim();
+          const hours = Number(r.hours);
+
+          if (!project) errors.push(`${rowLabel}: Project is required.`);
+          if (!summary) errors.push(`${rowLabel}: Work Summary is required.`);
+          if (!ado) errors.push(`${rowLabel}: ADO Ticket is required.`);
+
+          if (!Number.isFinite(hours)) {
+            errors.push(`${rowLabel}: Hours must be a number.`);
+          } else if (isWeekend(r.dayName)) {
+            if (hours < 0) errors.push(`${rowLabel}: Hours cannot be negative.`);
+            // weekend allows 0
+          } else {
+            if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0 (weekdays).`);
+          }
+        });
+
+        return errors;
+      }
+
+    function clearValidationErrorsUI() {
+      const box = document.getElementById("validationBox");
+      if (box) {
+        box.style.display = "none";
+        box.innerHTML = "";
+      }
+
+      document.querySelectorAll("tbody tr").forEach(tr => {
+        tr.classList.remove("row-error");
+        tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+      });
+    }
+
+    function showValidationErrors(errors) {
+      const box = document.getElementById("validationBox");
+
+      // Fallback if container missing
+      if (!box) {
+        alert(Array.isArray(errors) ? errors.join("\n") : String(errors));
+        return;
+      }
+
+      // Display panel
+      const list = (Array.isArray(errors) ? errors : [String(errors)])
+        .map(e => `<li>${escapeHtml(e)}</li>`)
+        .join("");
+
+      box.innerHTML = `
+        <div><b>Please fix the following before submitting:</b></div>
+        <ul>${list}</ul>
+      `;
+      box.style.display = "block";
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      // Highlight rows based on error text like: "Row 3 (Mon): Project is required."
+      const trs = Array.from(document.querySelectorAll("tbody tr"));
+
+      for (const msg of (Array.isArray(errors) ? errors : [String(errors)])) {
+        const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
+        if (!m) continue;
+
+        const rowNum = Number(m[1]);   // your message is 1-based
+        const rowIndex = rowNum - 1;   // convert to 0-based
+        const detail = (m[3] || "").toLowerCase();
+
+        const tr = trs[rowIndex];
+        if (!tr) continue;
+
+        tr.classList.add("row-error");
+
+        // Optional: highlight specific field if we can infer it
+        if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
+        if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
+        if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
+        if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
+      }
+    }
+
+    // Simple HTML escape to avoid rendering issues
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    document.addEventListener("input", (e) => {
+      if (e.target.closest("tbody")) clearValidationErrorsUI();
+    });
+
+    document.addEventListener("change", (e) => {
+      if (e.target.closest("tbody")) clearValidationErrorsUI();
+    });
+
+    async function submitTimesheet() {
+          // ---- UI helpers (safe even if elements missing) ----
+          function getValidationBox() {
+            return document.getElementById("validationBox");
+          }
+
+          function clearValidationUI() {
+            const box = getValidationBox();
+            if (box) {
+              box.style.display = "none";
+              box.innerHTML = "";
+            }
+
+            document.querySelectorAll("tbody tr").forEach(tr => {
+              tr.classList.remove("row-error");
+              tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+            });
+          }
+
+          function escapeHtml(s) {
+            return String(s)
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+          }
+
+          function showValidationErrorsUI(errors) {
+            const msgs = Array.isArray(errors) ? errors : [String(errors)];
+            const box = getValidationBox();
+
+            // Render panel
+            if (box) {
+              box.innerHTML = `
+                <div><b>Please fix the following before submitting:</b></div>
+                <ul>${msgs.map(m => `<li>${escapeHtml(m)}</li>`).join("")}</ul>
+              `;
+              box.style.display = "block";
+              box.scrollIntoView({ behavior: "smooth", block: "start" });
+            } else {
+              // fallback
+              console.warn("validationBox not found; falling back to console.");
+              console.warn(msgs);
+            }
+
+            // Highlight rows/fields based on your error format:
+            // "Row 3 (Mon): Project is required."
+            const trs = Array.from(document.querySelectorAll("tbody tr"));
+
+            for (const msg of msgs) {
+              const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
+              if (!m) continue;
+
+              const rowNum = Number(m[1]);        // 1-based
+              const idx = rowNum - 1;             // 0-based
+              const detail = (m[3] || "").toLowerCase();
+
+              const tr = trs[idx];
+              if (!tr) continue;
+
+              tr.classList.add("row-error");
+
+              // Field-level highlighting (based on text)
+              if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
+              if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
+              if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
+              if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
+            }
+          }
+
+          // ---- start submit ----
+          clearValidationUI();
+
+          const submitBtn = document.getElementById("btnSubmit");
+          if (submitBtn) submitBtn.disabled = true;
+
+          try {
+            // Ensure weekends are auto-filled before validate & submit
+            autoFillWeekends();
+
+            const rows = collectRowsFromUI();
+
+            // Ensure dayName exists for server weekend rule + your validator
+            const trs = document.querySelectorAll("tbody tr");
+            for (let i = 0; i < trs.length; i++) {
+              rows[i].dayName = trs[i].children[1]?.textContent?.trim() || "";
+            }
+
+            const errors = validateRowsClient(rows);
+            if (errors.length) {
+              showValidationErrorsUI(errors);
+              return;
+            }
+
+            const url = `/timesheets/<%= timesheetId %>/submit`;
+
+            // Timeout protection (15s)
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), 15000);
+
+            const resp = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+              },
+              body: JSON.stringify({ weekEnding: "<%= weekEnding %>", rows }),
+              signal: controller.signal
+            });
+
+            clearTimeout(t);
+
+            const ct = resp.headers.get("content-type") || "";
+            const raw = await resp.text();
+
+            if (!resp.ok) {
+              let msg = "Submit failed.";
+              if (ct.includes("application/json")) {
+                try { msg = (JSON.parse(raw)?.message) || msg; } catch {}
+              } else {
+                msg = raw || msg;
+              }
+              showValidationErrorsUI([msg]);
+              return;
+            }
+
+            // Success
+            window.location.href = "/timesheets";
+
+          } catch (err) {
+            const msg =
+              err?.name === "AbortError"
+                ? "Submit timed out. Please try again (server may be busy)."
+                : (err?.message || String(err));
+
+            showValidationErrorsUI([msg]);
+            console.error("submitTimesheet error:", err);
+          } finally {
+            if (submitBtn) submitBtn.disabled = false;
+          }
+        }
+
+      
       function save() {
         const trs = document.querySelectorAll("tbody tr");
         const ids = <%- JSON.stringify(days.map(x => x.TimesheetDayId)) %>;
