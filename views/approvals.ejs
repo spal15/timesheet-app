@@ -25,10 +25,29 @@
           <td><%= r.ProjectName %></td>
           <td><span class="pill"><%= r.TimesheetStatus %></span></td>
           <td>
-            <a class="refresh-button" href="/approvals/<%= r.TimesheetProjectApprovalId %>/view">Review</a>
+            <button
+              type="button"
+              class="btn-primary btn-review"
+              data-timesheet-id="<%= r.TimesheetId %>">
+              Review
+            </button>
           </td>
         </tr>
       <% }) %>
     </tbody>
   </table>
 </div>
+<script>
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-review");
+    if (!btn) return;
+
+    const id = Number(btn.dataset.timesheetId);
+    if (!Number.isInteger(id) || id <= 0) {
+      alert("Invalid TimesheetId on button: " + btn.dataset.timesheetId);
+      return;
+    }
+
+    window.location.href = `/approvals/${id}/review`;
+  });
+</script>

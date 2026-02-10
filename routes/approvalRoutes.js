@@ -7,5 +7,6 @@ router.get("/approvals", requireRole("Approver","Admin"), approvalController.lis
 router.get("/approvals/:approvalId/view", requireRole("Approver","Admin"), approvalController.viewApproval);
 router.post("/approvals/:approvalId/approve", requireRole("Approver","Admin"), approvalController.approve);
 router.post("/approvals/:approvalId/reject", requireRole("Approver","Admin"), approvalController.reject);
+router.get("/approvals/:id/review", approvalController.reviewPage);
 
 module.exports = router;

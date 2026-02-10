@@ -1,5 +1,85 @@
 const { getPool, sql } = require("../db/db");
 
+
+/**
+ * Returns everything needed to render the review page for a given TimesheetId:
+ * - Timesheet header/vendor/status
+ * - Approvals/projects for this approver (or all if Admin)
+ * - Days for each project (re-uses your existing listProjectDaysForApproval)
+ */
+async function getTimesheetForReview(timesheetId, user) {
+  const pool = await getPool();
+
+  // 1) Load header/vendor/status (adjust column names to your schema)
+  const headerR = await pool.request()
+    .input("TimesheetId", sql.Int, timesheetId)
+    .query(`
+      SELECT
+        t.TimesheetId,
+        t.WeekEndingDate,
+        t.Status AS TimesheetStatus,
+        u.DisplayName AS VendorName,
+        u.Email AS VendorEmail
+      FROM dbo.Timesheets t
+      JOIN dbo.Users u ON u.UserId = t.VendorUserId
+      WHERE t.TimesheetId = @TimesheetId
+    `);
+
+  const header = headerR.recordset[0];
+  if (!header) return null;
+
+  // 2) Load approvals/projects for this timesheet
+  // If Admin, show all approvals; else only approvals assigned to this approver.
+  const approvalsR = await pool.request()
+    .input("TimesheetId", sql.Int, timesheetId)
+    .input("ApproverUserId", sql.Int, user.UserId)
+    .query(`
+      SELECT
+        a.TimesheetProjectApprovalId,
+        a.ProjectId,
+        p.ProjectName AS ProjectName,
+        a.Status AS ApprovalStatus,
+        a.Comment
+      FROM dbo.TimesheetProjectApprovals a
+      JOIN dbo.Projects p ON p.ProjectId = a.ProjectId
+      WHERE a.TimesheetId = @TimesheetId
+        AND (${user.Role === "Admin" ? "1=1" : "a.ApproverUserId = @ApproverUserId"})
+      ORDER BY p.ProjectName
+    `);
+
+  const approvals = approvalsR.recordset || [];
+
+  // If not admin and no approvals found, forbid
+  if (user.Role !== "Admin" && approvals.length === 0) {
+    return { forbidden: true };
+  }
+
+  // 3) For each project approval, get day rows using your existing method
+  // (This uses listProjectDaysForApproval(timesheetId, projectName) already in your service)
+  const projects = [];
+  for (const a of approvals) {
+    const days = await listProjectDaysForApproval(timesheetId, a.ProjectName);
+    projects.push({
+      approvalId: a.TimesheetProjectApprovalId,
+      projectName: a.ProjectName,
+      approvalStatus: a.ApprovalStatus,
+      comment: a.Comment,
+      days
+    });
+  }
+
+  // 4) Shape model for EJS
+  return {
+    timesheetId: header.TimesheetId,
+    weekEnding: header.WeekEndingDate.toISOString().slice(0, 10),
+    timesheetStatus: header.TimesheetStatus,
+    vendorName: header.VendorName,
+    vendorEmail: header.VendorEmail,
+    projects
+  };
+}
+
+
 async function clearApprovalTasks(timesheetId) {
   const pool = await getPool();
   await pool.request()
@@ -129,5 +209,9 @@ module.exports = {
   getApprovalById,
   listProjectDaysForApproval,
   setApprovalStatus,
-  recomputeTimesheetFinalStatus
+  recomputeTimesheetFinalStatus,
+  getTimesheetForReview
 };
+
+
+
