@@ -2,15 +2,48 @@ const timesheetService = require("../services/timesheetService");
 const projectService = require("../services/projectService");
 const approvalService = require("../services/approvalService");
 
-async function listMyTimesheets(req, res) {
-  const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
-  return res.render("timesheets", { rows, error: null, errors: [] });
+function isValidISODate(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 }
 
+function isWeekEndingAllowed(yyyyMmDd) {
+  // Toggle this depending on your definition of week-ending:
+  // Friday = 5, Saturday = 6
+  const REQUIRE_FRIDAY = true; // <-- set true if week ending must be Friday
+  const REQUIRE_SATURDAY = false; // <-- set true if week ending must be Saturday
+
+  const d = new Date(yyyyMmDd + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return false;
+
+  const dow = d.getDay(); // local day
+  if (REQUIRE_FRIDAY) return dow === 5;
+  if (REQUIRE_SATURDAY) return dow === 6;
+
+  return true; // if no strict weekday requirement
+}
+
+async function listMyTimesheets(req, res) {
+  const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
+  const weekEnding = String(req.query.weekEnding || "").trim(); // optional prefill
+
+  return res.render("timesheets", { rows, weekEnding, error: null, errors: [] });
+}
 
 async function editTimesheet(req, res) {
   const weekEnding = String(req.query.weekEnding || "").trim();
+
   if (!weekEnding) return res.redirect("/timesheets");
+
+  // ✅ Server-side validation for date picker input
+  if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
+    const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
+    const msg = !isValidISODate(weekEnding)
+      ? "Invalid week ending date format. Please select a date."
+      : "Selected week ending date is not allowed. Please select the correct week ending day.";
+    const weekEnding = String(req.query.weekEnding || "").trim(); // optional prefill
+  
+    return res.status(400).render("timesheets", { rows, weekEnding, error: msg, errors: [] });
+  }
 
   const timesheetId = await timesheetService.upsertTimesheetHeader(req.user.UserId, weekEnding);
   const header = await timesheetService.getTimesheetHeader(timesheetId);
@@ -25,14 +58,16 @@ async function editTimesheet(req, res) {
     weekEnding,
     status: header.Status,
     days,
-    projects,     // ✅ NEW
+    projects,
     error: null
   });
 }
 
 async function saveTimesheet(req, res) {
   const timesheetId = Number(req.params.id);
-  if (!Number.isFinite(timesheetId)) return res.status(400).json({ ok: false, message: "Invalid timesheet id" });
+  if (!Number.isInteger(timesheetId) || timesheetId <= 0) {
+    return res.status(400).json({ ok: false, message: "Invalid timesheet id" });
+  }
 
   const rows = req.body?.rows || [];
   if (!Array.isArray(rows)) return res.status(400).json({ ok: false, message: "rows must be an array" });
@@ -62,8 +97,13 @@ async function submitTimesheet(req, res) {
       : res.status(status).send(message);
   };
 
-  if (!Number.isFinite(timesheetId)) return fail(400, "Invalid timesheet id");
+  if (!Number.isInteger(timesheetId) || timesheetId <= 0) return fail(400, "Invalid timesheet id");
   if (!weekEnding) return fail(400, "weekEnding is required");
+
+  // ✅ Server-side validation for date picker input
+  if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
+    return fail(400, "Invalid weekEnding date. Please select a valid week ending date.");
+  }
 
   if (!Array.isArray(rows) || rows.length !== 7) {
     return fail(400, "Submit must include 7 rows (one per day).");
@@ -86,7 +126,6 @@ async function submitTimesheet(req, res) {
     days.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
   );
 
-  // Ensure every row has a valid timesheetDayId (prevents updating wrong or missing row)
   const badId = rows.find(r => !Number.isFinite(Number(r.timesheetDayId)) || !dayById.has(Number(r.timesheetDayId)));
   if (badId) {
     const msg = "Submit payload is missing a valid timesheetDayId for one or more rows. Please refresh the page and try again.";
@@ -103,13 +142,12 @@ async function submitTimesheet(req, res) {
 
   function isWeekendFromDayName(dayName) {
     const dn = String(dayName || "").toLowerCase();
-    if (dn) return dn.startsWith("sat") || dn.startsWith("sun");
-    return false;
+    return dn.startsWith("sat") || dn.startsWith("sun");
   }
 
   function isWeekendFromDate(workDate) {
     const wd = workDate instanceof Date ? workDate : new Date(workDate);
-    const dow = wd.getUTCDay(); // 0=Sun,6=Sat
+    const dow = wd.getUTCDay();
     return dow === 0 || dow === 6;
   }
 
@@ -120,18 +158,15 @@ async function submitTimesheet(req, res) {
     r.adoTickets = String(r.adoTickets || "").trim() || "N/A";
   }
 
-  // ✅ Validate based on user-entered rows (but enriched with DB day info)
   const errors = [];
 
   rows.forEach((r, idx) => {
     const id = Number(r.timesheetDayId);
     const dayInfo = dayById.get(id);
 
-    // If client didn't send dayName, infer it from DB
     const dayName = String(r.dayName || dayInfo?.DayName || "");
     const weekend = isWeekendFromDayName(dayName) || isWeekendFromDate(dayInfo?.WorkDate);
 
-    // Autofill weekends if user left blank (optional behavior)
     if (weekend) autofillWeekendDefaults(r);
 
     const rowLabel = `Row ${idx + 1}${dayName ? ` (${dayName})` : ""}`;
@@ -149,7 +184,6 @@ async function submitTimesheet(req, res) {
       errors.push(`${rowLabel}: Hours must be a number.`);
     } else if (weekend) {
       if (hours < 0) errors.push(`${rowLabel}: Hours cannot be negative.`);
-      // weekend allows 0
     } else {
       if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0 (weekdays).`);
     }
@@ -172,10 +206,8 @@ async function submitTimesheet(req, res) {
     });
   }
 
-  // ✅ Persist what user entered (and weekend autofill updates) before submit
   await timesheetService.updateTimesheetDaysEditable(timesheetId, rows);
 
-  // ✅ Approvals from submitted rows
   const usedProjectNames = [...new Set(rows.map(r => String(r.projectName || "").trim()).filter(Boolean))];
 
   for (const projectName of usedProjectNames) {

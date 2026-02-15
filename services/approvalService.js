@@ -1,16 +1,16 @@
+// services/approvalService.js
 const { getPool, sql } = require("../db/db");
-
 
 /**
  * Returns everything needed to render the review page for a given TimesheetId:
  * - Timesheet header/vendor/status
  * - Approvals/projects for this approver (or all if Admin)
- * - Days for each project (re-uses your existing listProjectDaysForApproval)
+ * - Days for each project (matched by ProjectName since TimesheetDays has no ProjectId)
  */
 async function getTimesheetForReview(timesheetId, user) {
   const pool = await getPool();
 
-  // 1) Load header/vendor/status (adjust column names to your schema)
+  // 1) Header/vendor/status
   const headerR = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .query(`
@@ -28,39 +28,43 @@ async function getTimesheetForReview(timesheetId, user) {
   const header = headerR.recordset[0];
   if (!header) return null;
 
-  // 2) Load approvals/projects for this timesheet
-  // If Admin, show all approvals; else only approvals assigned to this approver.
-  const approvalsR = await pool.request()
+  // 2) Approvals for this timesheet (Admin sees all; Approver sees only theirs)
+  const approvalsReq = pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
-    .input("ApproverUserId", sql.Int, user.UserId)
-    .query(`
-      SELECT
-        a.TimesheetProjectApprovalId,
-        a.ProjectId,
-        p.ProjectName AS ProjectName,
-        a.Status AS ApprovalStatus,
-        a.Comment
-      FROM dbo.TimesheetProjectApprovals a
-      JOIN dbo.Projects p ON p.ProjectId = a.ProjectId
-      WHERE a.TimesheetId = @TimesheetId
-        AND (${user.Role === "Admin" ? "1=1" : "a.ApproverUserId = @ApproverUserId"})
-      ORDER BY p.ProjectName
-    `);
+    .input("ApproverUserId", sql.Int, user.UserId);
 
+  let approvalsQuery = `
+    SELECT
+      a.TimesheetProjectApprovalId,
+      a.ProjectId,
+      p.ProjectName,
+      a.Status AS ApprovalStatus,
+      a.Comment
+    FROM dbo.TimesheetProjectApprovals a
+    JOIN dbo.Projects p ON p.ProjectId = a.ProjectId
+    WHERE a.TimesheetId = @TimesheetId
+  `;
+
+  if (user.Role !== "Admin") {
+    approvalsQuery += ` AND a.ApproverUserId = @ApproverUserId `;
+  }
+
+  approvalsQuery += ` ORDER BY p.ProjectName `;
+
+  const approvalsR = await approvalsReq.query(approvalsQuery);
   const approvals = approvalsR.recordset || [];
 
-  // If not admin and no approvals found, forbid
   if (user.Role !== "Admin" && approvals.length === 0) {
     return { forbidden: true };
   }
 
-  // 3) For each project approval, get day rows using your existing method
-  // (This uses listProjectDaysForApproval(timesheetId, projectName) already in your service)
+  // 3) Load day rows per approval (NO ProjectId in TimesheetDays)
   const projects = [];
   for (const a of approvals) {
     const days = await listProjectDaysForApproval(timesheetId, a.ProjectName);
     projects.push({
       approvalId: a.TimesheetProjectApprovalId,
+      projectId: a.ProjectId,
       projectName: a.ProjectName,
       approvalStatus: a.ApprovalStatus,
       comment: a.Comment,
@@ -68,7 +72,6 @@ async function getTimesheetForReview(timesheetId, user) {
     });
   }
 
-  // 4) Shape model for EJS
   return {
     timesheetId: header.TimesheetId,
     weekEnding: header.WeekEndingDate.toISOString().slice(0, 10),
@@ -78,7 +81,6 @@ async function getTimesheetForReview(timesheetId, user) {
     projects
   };
 }
-
 
 async function clearApprovalTasks(timesheetId) {
   const pool = await getPool();
@@ -99,23 +101,35 @@ async function createApprovalTask(timesheetId, projectId, approverUserId) {
     `);
 }
 
+/**
+ * Pending approvals grid for approver
+ */
 async function listPendingApprovalsForApprover(approverUserId) {
   const pool = await getPool();
   const r = await pool.request()
     .input("ApproverUserId", sql.Int, approverUserId)
     .query(`
-      SELECT tpa.TimesheetProjectApprovalId, tpa.Status AS ApprovalStatus,
-             p.ProjectName, t.TimesheetId, t.WeekEndingDate, t.TotalHours, t.Status AS TimesheetStatus,
-             u.DisplayName AS VendorName, u.Email AS VendorEmail
+      SELECT
+        tpa.TimesheetProjectApprovalId AS ApprovalId,
+        tpa.ProjectId AS ProjectId,
+        tpa.Status AS ApprovalStatus,
+        p.ProjectName,
+        t.TimesheetId,
+        t.WeekEndingDate,
+        t.TotalHours,
+        t.Status AS TimesheetStatus,
+        u.DisplayName AS VendorName,
+        u.Email AS VendorEmail
       FROM dbo.TimesheetProjectApprovals tpa
-      JOIN dbo.Timesheets t ON t.TimesheetId=tpa.TimesheetId
-      JOIN dbo.Projects p ON p.ProjectId=tpa.ProjectId
-      JOIN dbo.Users u ON u.UserId=t.VendorUserId
-      WHERE tpa.Status='Pending'
-        AND t.Status='Submitted'
-        AND tpa.ApproverUserId=@ApproverUserId
-      ORDER BY t.WeekEndingDate DESC
+      JOIN dbo.Timesheets t ON t.TimesheetId = tpa.TimesheetId
+      JOIN dbo.Projects p ON p.ProjectId = tpa.ProjectId
+      JOIN dbo.Users u ON u.UserId = t.VendorUserId
+      WHERE tpa.Status = 'Pending'
+        AND t.Status = 'Submitted'
+        AND tpa.ApproverUserId = @ApproverUserId
+      ORDER BY t.WeekEndingDate DESC, u.DisplayName, p.ProjectName
     `);
+
   return r.recordset;
 }
 
@@ -124,31 +138,67 @@ async function getApprovalById(approvalId) {
   const r = await pool.request()
     .input("ApprovalId", sql.Int, approvalId)
     .query(`
-      SELECT TOP 1 tpa.*, p.ProjectName, t.WeekEndingDate, t.Status AS TimesheetStatus,
-             t.TimesheetId,
-             u.DisplayName AS VendorName, u.Email AS VendorEmail
+      SELECT TOP 1
+        tpa.TimesheetProjectApprovalId,
+        tpa.TimesheetId       AS TimesheetId,
+        tpa.ProjectId         AS ProjectId,
+        tpa.ApproverUserId    AS ApproverUserId,
+        tpa.Status            AS ApprovalStatus,
+        tpa.Comment           AS Comment,
+
+        p.ProjectName         AS ProjectName,
+        t.WeekEndingDate      AS WeekEndingDate,
+        t.Status              AS TimesheetStatus,
+
+        u.DisplayName         AS VendorName,
+        u.Email               AS VendorEmail
       FROM dbo.TimesheetProjectApprovals tpa
-      JOIN dbo.Projects p ON p.ProjectId=tpa.ProjectId
-      JOIN dbo.Timesheets t ON t.TimesheetId=tpa.TimesheetId
-      JOIN dbo.Users u ON u.UserId=t.VendorUserId
-      WHERE tpa.TimesheetProjectApprovalId=@ApprovalId
+      JOIN dbo.Projects  p ON p.ProjectId   = tpa.ProjectId
+      JOIN dbo.Timesheets t ON t.TimesheetId = tpa.TimesheetId
+      JOIN dbo.Users     u ON u.UserId      = t.VendorUserId
+      WHERE tpa.TimesheetProjectApprovalId = @ApprovalId
     `);
+
   return r.recordset[0] || null;
 }
 
+/**
+ * TimesheetDays has NO ProjectId column.
+ * Match ONLY by ProjectName (normalized) and show all rows for that project.
+ *
+ * NOTE: No Hours filter so approver sees all rows.
+ */
 async function listProjectDaysForApproval(timesheetId, projectName) {
   const pool = await getPool();
   const r = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .input("ProjectName", sql.NVarChar(200), projectName)
     .query(`
-      SELECT WorkDate, DayName, ProjectName, WorkSummary, ADOTickets, Hours
+      SELECT
+        WorkDate,
+        DayName,
+        ProjectName,
+        WorkSummary,
+        ADOTickets,
+        Hours
       FROM dbo.TimesheetDays
-      WHERE TimesheetId=@TimesheetId
-        AND LTRIM(RTRIM(ProjectName)) = LTRIM(RTRIM(@ProjectName))
-        AND Hours > 0
+      WHERE TimesheetId = @TimesheetId
+        AND UPPER(
+              REPLACE(
+                REPLACE(
+                  REPLACE(LTRIM(RTRIM(ProjectName)), CHAR(9), ''),   -- tabs
+                CHAR(160), ''),                                     -- nbsp
+              ' ', '')                                              -- spaces
+            ) = UPPER(
+              REPLACE(
+                REPLACE(
+                  REPLACE(LTRIM(RTRIM(@ProjectName)), CHAR(9), ''),
+                CHAR(160), ''),
+              ' ', '')
+            )
       ORDER BY WorkDate
     `);
+
   return r.recordset;
 }
 
@@ -170,7 +220,11 @@ async function recomputeTimesheetFinalStatus(timesheetId) {
 
   const anyRejected = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
-    .query(`SELECT COUNT(1) AS Cnt FROM dbo.TimesheetProjectApprovals WHERE TimesheetId=@TimesheetId AND Status='Rejected'`);
+    .query(`
+      SELECT COUNT(1) AS Cnt
+      FROM dbo.TimesheetProjectApprovals
+      WHERE TimesheetId=@TimesheetId AND Status='Rejected'
+    `);
 
   if (anyRejected.recordset[0].Cnt > 0) {
     await pool.request()
@@ -185,11 +239,19 @@ async function recomputeTimesheetFinalStatus(timesheetId) {
 
   const pending = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
-    .query(`SELECT COUNT(1) AS Cnt FROM dbo.TimesheetProjectApprovals WHERE TimesheetId=@TimesheetId AND Status='Pending'`);
+    .query(`
+      SELECT COUNT(1) AS Cnt
+      FROM dbo.TimesheetProjectApprovals
+      WHERE TimesheetId=@TimesheetId AND Status='Pending'
+    `);
 
   const total = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
-    .query(`SELECT COUNT(1) AS Cnt FROM dbo.TimesheetProjectApprovals WHERE TimesheetId=@TimesheetId`);
+    .query(`
+      SELECT COUNT(1) AS Cnt
+      FROM dbo.TimesheetProjectApprovals
+      WHERE TimesheetId=@TimesheetId
+    `);
 
   if (total.recordset[0].Cnt > 0 && pending.recordset[0].Cnt === 0) {
     await pool.request()
@@ -212,6 +274,3 @@ module.exports = {
   recomputeTimesheetFinalStatus,
   getTimesheetForReview
 };
-
-
-

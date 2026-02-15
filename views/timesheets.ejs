@@ -1,8 +1,12 @@
 <h2>My Timesheets</h2>
 
+<%
+  // Prevent "weekEnding is not defined"
+  const weekEndingValue = (typeof weekEnding !== "undefined" && weekEnding) ? weekEnding : "";
+%>
+
 <% if (typeof error !== "undefined" && error) { %>
   <div class="alert alert-error">
-    
     <%- String(error).replace(/\n/g, "<br/>") %>
   </div>
 <% } %>
@@ -18,15 +22,19 @@
   </div>
 <% } %>
 
-
 <div class="entity">
   <div class="entity-name">Create / Open Timesheet</div>
 
   <form method="get" action="/timesheets/edit" class="filter-container">
+    <label for="weekEnding">Week Ending</label>
     <input
+      type="date"
+      id="weekEnding"
       name="weekEnding"
-      placeholder="Week Ending (YYYY-MM-DD) e.g. 2026-02-06"
-    />
+      value="<%= weekEndingValue %>"
+      class="weekending-input"
+      required
+    >
     <button class="btn-primary" type="submit">Open / Create</button>
     <a href="/home">Back</a>
   </form>
@@ -55,7 +63,7 @@
         </tr>
       <% } %>
 
-      <% rows.forEach(r => { %>
+      <% (rows || []).forEach(r => { %>
         <tr>
           <td><%= r.WeekEndingDate.toISOString().slice(0,10) %></td>
           <td><span class="pill"><%= r.Status %></span></td>
@@ -73,3 +81,33 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  function isFriday(yyyyMmDd) {
+    const d = new Date(yyyyMmDd + "T00:00:00");
+    return d.getDay() === 5; // 0=Sun ... 5=Fri
+  }
+
+  document.getElementById("weekEnding")?.addEventListener("change", (e) => {
+    const v = e.target.value;
+    if (!v) return;
+
+    if (!isFriday(v)) {
+      alert("Please select a Friday as the Week Ending date.");
+      e.target.value = "";
+      e.target.focus();
+    }
+  });
+
+  function getThisWeeksFridayISO() {
+    const now = new Date();
+    const day = now.getDay(); // 0 Sun..6 Sat
+    const diffToFri = (5 - day + 7) % 7;
+    const fri = new Date(now);
+    fri.setDate(now.getDate() + diffToFri);
+    return fri.toISOString().slice(0, 10);
+  }
+
+  const we = document.getElementById("weekEnding");
+  if (we && !we.value) we.value = getThisWeeksFridayISO();
+</script>

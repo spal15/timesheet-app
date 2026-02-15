@@ -28,7 +28,7 @@
             <button
               type="button"
               class="btn-primary btn-review"
-              data-timesheet-id="<%= r.TimesheetId %>">
+              data-approval-id="<%= r.ApprovalId %>">
               Review
             </button>
           </td>
@@ -37,17 +37,20 @@
     </tbody>
   </table>
 </div>
+
 <script>
   document.addEventListener("click", (e) => {
     const btn = e.target.closest(".btn-review");
     if (!btn) return;
 
-    const id = Number(btn.dataset.timesheetId);
-    if (!Number.isInteger(id) || id <= 0) {
-      alert("Invalid TimesheetId on button: " + btn.dataset.timesheetId);
+    const approvalId = Number(btn.dataset.approvalId);
+
+    if (!Number.isInteger(approvalId) || approvalId <= 0) {
+      alert("Invalid ApprovalId on button: " + btn.dataset.approvalId);
       return;
     }
 
-    window.location.href = `/approvals/${id}/review`;
+    // ✅ Navigate using approvalId only (clean & correct)
+    window.location.href = `/approvals/${approvalId}/view`;
   });
 </script>

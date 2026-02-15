@@ -1,3 +1,4 @@
+// controllers/approvalcontroller.js
 const approvalService = require("../services/approvalService");
 const timesheetService = require("../services/timesheetService");
 
@@ -14,16 +15,22 @@ async function viewApproval(req, res) {
   if (!approval) return res.status(404).send("Approval not found");
   if (req.user.Role !== "Admin" && approval.ApproverUserId !== req.user.UserId) return res.status(403).send("Forbidden");
 
-  const days = await approvalService.listProjectDaysForApproval(approval.TimesheetId, approval.ProjectName);
+  const approvalTimesheetId = Number(approval.TimesheetId);
+  if (!Number.isInteger(approvalTimesheetId) || approvalTimesheetId <= 0) {
+    console.log("DEBUG invalid approval.TimesheetId raw:", approval.TimesheetId);
+    return res.status(500).send("Approval has invalid TimesheetId.");
+  }
+
+  const days = await approvalService.listProjectDaysForApproval(approvalTimesheetId, approval.ProjectName);
 
   return res.render("timesheet_edit", {
-    timesheetId: approval.TimesheetId,
+    timesheetId: approvalTimesheetId,
     weekEnding: approval.WeekEndingDate.toISOString().slice(0, 10),
     status: approval.TimesheetStatus,
     days,
     error: null,
     approvalView: true,
-    approvalId,
+    approvalId, // from URL
     projectName: approval.ProjectName,
     vendorName: approval.VendorName,
     vendorEmail: approval.VendorEmail
@@ -39,7 +46,12 @@ async function approve(req, res) {
   if (req.user.Role !== "Admin" && approval.ApproverUserId !== req.user.UserId) return res.status(403).send("Forbidden");
 
   await approvalService.setApprovalStatus(approvalId, "Approved", null);
-  await timesheetService.addAudit(approval.TimesheetId, req.user.UserId, "Approved", `Approved project: ${approval.ProjectName}`);
+  await timesheetService.addAudit(
+    approval.TimesheetId,
+    req.user.UserId,
+    "Approved",
+    `Approved project: ${approval.ProjectName}`
+  );
   await approvalService.recomputeTimesheetFinalStatus(approval.TimesheetId);
 
   return res.redirect("/approvals");
@@ -64,42 +76,78 @@ async function reject(req, res) {
 }
 
 /**
- * Review a submitted timesheet by TimesheetId (from grid "Review" button)
- * Route: GET /approvals/:id/review
+ * Review a submitted timesheet for a SPECIFIC project approval (Option A)
+ * Route: GET /approvals/:id/review?approvalId=123&projectId=45
+ *
+ * NOTE: TimesheetDays has NO ProjectId column.
+ * We only use projectId here to validate the URL against the approval record (anti-tamper).
+ * We do NOT pass projectId into any SQL calls.
  */
 async function reviewPage(req, res) {
-  const timesheetId = Number(req.params.id);
+  const routeTimesheetId = Number(req.params.id);
+  const approvalId = Number(req.query.approvalId);
+  const routeProjectId = Number(req.query.projectId);
 
-  console.log("reviewPage param id:", req.params.id, "parsed:", timesheetId);
+  console.log(
+    "reviewPage timesheetId:", req.params.id, "parsed:", routeTimesheetId,
+    "approvalId:", req.query.approvalId, "parsed:", approvalId,
+    "projectId:", req.query.projectId, "parsed:", routeProjectId
+  );
 
-  if (!Number.isInteger(timesheetId) || timesheetId <= 0) {
+  if (!Number.isInteger(routeTimesheetId) || routeTimesheetId <= 0) {
     return res.status(400).send("Invalid TimesheetId.");
   }
+  if (!Number.isInteger(approvalId) || approvalId <= 0) {
+    return res.status(400).send("Invalid approvalId.");
+  }
+  if (!Number.isInteger(routeProjectId) || routeProjectId <= 0) {
+    return res.status(400).send("Invalid projectId.");
+  }
 
-  // IMPORTANT: use approvalService (not approvalsService)
-  // This service method should return whatever your review page needs:
-  // header, vendor, projects, days, approvals, etc.
-  const data = await approvalService.getTimesheetForReview(timesheetId, req.user);
+  const approval = await approvalService.getApprovalById(approvalId);
+  if (!approval) return res.status(404).send("Approval not found");
 
-  // Optional authorization check inside controller (or inside service):
-  // If your approvers should only see timesheets where they have pending approvals.
-  // If you already enforce in the service, you can remove this.
-  if (data?.forbidden) return res.status(403).send("Forbidden");
-  if (!data) return res.status(404).send("Timesheet not found");
+  if (req.user.Role !== "Admin" && approval.ApproverUserId !== req.user.UserId) {
+    return res.status(403).send("Forbidden");
+  }
+
+  // Coerce DB values
+  const approvalTimesheetId = Number(approval.TimesheetId);
+  const approvalProjectId = Number(approval.ProjectId);
+
+  if (!Number.isInteger(approvalTimesheetId) || approvalTimesheetId <= 0) {
+    console.log("DEBUG invalid approval.TimesheetId raw:", approval.TimesheetId);
+    return res.status(500).send("Approval has invalid TimesheetId.");
+  }
+  if (!Number.isInteger(approvalProjectId) || approvalProjectId <= 0) {
+    console.log("DEBUG invalid approval.ProjectId raw:", approval.ProjectId);
+    return res.status(500).send("Approval has invalid ProjectId.");
+  }
+
+  // Anti-tamper checks
+  if (approvalTimesheetId !== routeTimesheetId) {
+    // canonical redirect
+    return res.redirect(`/approvals/${approvalTimesheetId}/review?approvalId=${approvalId}&projectId=${routeProjectId}`);
+  }
+  if (approvalProjectId !== routeProjectId) {
+    return res.status(400).send("Approval does not match ProjectId.");
+  }
+
+  // ✅ ONLY TimesheetId + ProjectName for TimesheetDays lookup
+  const days = await approvalService.listProjectDaysForApproval(approvalTimesheetId, approval.ProjectName);
 
   return res.render("timesheet_edit", {
-    timesheetId: data.timesheetId,
-    weekEnding: data.weekEnding,
-    status: data.timesheetStatus,
-    days: data.projects?.[0]?.days || [],      // simplest: show first project
+    timesheetId: approvalTimesheetId,
+    weekEnding: approval.WeekEndingDate.toISOString().slice(0, 10),
+    status: approval.TimesheetStatus,
+    days,
     error: null,
     approvalView: true,
-    approvalId: data.projects?.[0]?.approvalId || null,
-    projectName: data.projects?.[0]?.projectName || "",
-    vendorName: data.vendorName,
-    vendorEmail: data.vendorEmail
+    approvalId: approval.TimesheetProjectApprovalId,
+    projectName: approval.ProjectName,
+    vendorName: approval.VendorName,
+    vendorEmail: approval.VendorEmail
   });
-
 }
 
 module.exports = {
