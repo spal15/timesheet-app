@@ -2,6 +2,39 @@
   Timesheet - Week Ending <%= weekEnding %>
   <span class="pill"><%= status %></span>
 </h2>
+<% if (status === "Rejected" && (rejectedProjects || []).length) { %>
+  <div class="alert alert-error" style="margin-top:12px; cursor:pointer;" onclick="toggleRejectDetails()">
+    <div class="alert-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>❌ Rejected <span style="font-weight:normal;">(click to expand)</span></span>
+      <span id="rejectChevron" aria-hidden="true">▸</span>
+    </div>
+
+    <div id="rejectDetails" class="alert-body" style="display:none; margin-top:8px;">
+      <div style="margin-bottom:6px;"><b>Rejection details by project:</b></div>
+      <ul style="margin:0; padding-left:18px;">
+        <% rejectedProjects.forEach(r => { %>
+          <li style="margin-bottom:6px;">
+            <b><%= r.ProjectName %>:</b>
+            <span><%= r.Comment %></span>
+          </li>
+        <% }) %>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    function toggleRejectDetails() {
+      const details = document.getElementById("rejectDetails");
+      const chev = document.getElementById("rejectChevron");
+      if (!details) return;
+
+      const open = details.style.display !== "none";
+      details.style.display = open ? "none" : "block";
+      if (chev) chev.textContent = open ? "▸" : "▾";
+    }
+  </script>
+<% } %>
+
 
 <% if (typeof error !== "undefined" && error) { %>
   <div id="validationAlert" class="alert alert-error">
@@ -11,11 +44,13 @@
     </div>
   </div>
 <% } %>
+
 <div id="saveSuccessAlert" class="alert alert-success" style="display:none;">
   <div class="alert-title">✅ Saved</div>
   <div class="alert-body">Your timesheet draft has been saved.</div>
 </div>
 
+<!-- Used by BOTH vendor submit validation + approver reject validation -->
 <div id="validationBox" class="validation-box" style="display:none;"></div>
 
 <div class="entity">
@@ -71,6 +106,9 @@
   </table>
 
   <% if (!(typeof approvalView !== "undefined" && approvalView)) { %>
+    <!-- ========================= -->
+    <!-- Vendor Edit / Submit View -->
+    <!-- ========================= -->
     <div class="filter-container" style="margin-top:16px;">
       <button class="btn-secondary" type="button" onclick="save()">Save Draft</button>
 
@@ -78,32 +116,29 @@
         Submit
       </button>
 
-
       <a href="/timesheets" class="back-link">Back</a>
     </div>
 
     <script>
-
-
       function clearValidationAlert() {
         const el = document.getElementById("validationAlert");
         if (el) el.style.display = "none";
       }
 
       function showSaveSuccess(message) {
-          const el = document.getElementById("saveSuccessAlert");
-          if (!el) return;
+        const el = document.getElementById("saveSuccessAlert");
+        if (!el) return;
 
-          const body = el.querySelector(".alert-body");
-          if (body) body.textContent = message || "Your timesheet draft has been saved.";
+        const body = el.querySelector(".alert-body");
+        if (body) body.textContent = message || "Your timesheet draft has been saved.";
 
-          el.style.display = "block";
+        el.style.display = "block";
 
-          // auto-hide after 3 seconds
-          window.clearTimeout(window.__saveSuccessTimer);
-          window.__saveSuccessTimer = window.setTimeout(() => {
-            el.style.display = "none";
-          }, 3000);
+        // auto-hide after 3 seconds
+        window.clearTimeout(window.__saveSuccessTimer);
+        window.__saveSuccessTimer = window.setTimeout(() => {
+          el.style.display = "none";
+        }, 3000);
       }
 
       function isWeekendDayName(dayName) {
@@ -128,7 +163,7 @@
           if (summaryInp && !summaryInp.value) summaryInp.value = "Weekend";
           if (hoursInp && (hoursInp.value === "" || hoursInp.value == null)) hoursInp.value = "0";
 
-          // Recommended: fill ADO for weekends so submit rule "all fields required" passes
+          // fill ADO for weekends so submit rule "all fields required" passes
           if (adoInp && !adoInp.value) adoInp.value = "N/A";
         }
       }
@@ -187,226 +222,214 @@
         return errors;
       }
 
-    function clearValidationErrorsUI() {
-      const box = document.getElementById("validationBox");
-      if (box) {
-        box.style.display = "none";
-        box.innerHTML = "";
+      function clearValidationErrorsUI() {
+        const box = document.getElementById("validationBox");
+        if (box) {
+          box.style.display = "none";
+          box.innerHTML = "";
+        }
+
+        document.querySelectorAll("tbody tr").forEach(tr => {
+          tr.classList.remove("row-error");
+          tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+        });
       }
 
-      document.querySelectorAll("tbody tr").forEach(tr => {
-        tr.classList.remove("row-error");
-        tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+      function showValidationErrors(errors) {
+        const box = document.getElementById("validationBox");
+
+        // Fallback if container missing
+        if (!box) {
+          alert(Array.isArray(errors) ? errors.join("\n") : String(errors));
+          return;
+        }
+
+        // Display panel
+        const list = (Array.isArray(errors) ? errors : [String(errors)])
+          .map(e => `<li>${escapeHtml(e)}</li>`)
+          .join("");
+
+        box.innerHTML = `
+          <div><b>Please fix the following before submitting:</b></div>
+          <ul>${list}</ul>
+        `;
+        box.style.display = "block";
+        box.scrollIntoView({ behavior: "smooth", block: "start" });
+
+        // Highlight rows based on error text like: "Row 3 (Mon): Project is required."
+        const trs = Array.from(document.querySelectorAll("tbody tr"));
+
+        for (const msg of (Array.isArray(errors) ? errors : [String(errors)])) {
+          const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
+          if (!m) continue;
+
+          const rowNum = Number(m[1]);   // 1-based
+          const rowIndex = rowNum - 1;   // 0-based
+          const detail = (m[3] || "").toLowerCase();
+
+          const tr = trs[rowIndex];
+          if (!tr) continue;
+
+          tr.classList.add("row-error");
+
+          // Optional: highlight specific field if we can infer it
+          if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
+          if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
+          if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
+          if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
+        }
+      }
+
+      // Simple HTML escape to avoid rendering issues
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      document.addEventListener("input", (e) => {
+        if (e.target.closest("tbody")) clearValidationErrorsUI();
       });
-    }
 
-    function showValidationErrors(errors) {
-      const box = document.getElementById("validationBox");
+      document.addEventListener("change", (e) => {
+        if (e.target.closest("tbody")) clearValidationErrorsUI();
+      });
 
-      // Fallback if container missing
-      if (!box) {
-        alert(Array.isArray(errors) ? errors.join("\n") : String(errors));
-        return;
-      }
+      async function submitTimesheet() {
+        // ---- UI helpers ----
+        function getValidationBox() {
+          return document.getElementById("validationBox");
+        }
 
-      // Display panel
-      const list = (Array.isArray(errors) ? errors : [String(errors)])
-        .map(e => `<li>${escapeHtml(e)}</li>`)
-        .join("");
-
-      box.innerHTML = `
-        <div><b>Please fix the following before submitting:</b></div>
-        <ul>${list}</ul>
-      `;
-      box.style.display = "block";
-      box.scrollIntoView({ behavior: "smooth", block: "start" });
-
-      // Highlight rows based on error text like: "Row 3 (Mon): Project is required."
-      const trs = Array.from(document.querySelectorAll("tbody tr"));
-
-      for (const msg of (Array.isArray(errors) ? errors : [String(errors)])) {
-        const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
-        if (!m) continue;
-
-        const rowNum = Number(m[1]);   // your message is 1-based
-        const rowIndex = rowNum - 1;   // convert to 0-based
-        const detail = (m[3] || "").toLowerCase();
-
-        const tr = trs[rowIndex];
-        if (!tr) continue;
-
-        tr.classList.add("row-error");
-
-        // Optional: highlight specific field if we can infer it
-        if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
-        if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
-        if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
-        if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
-      }
-    }
-
-    // Simple HTML escape to avoid rendering issues
-    function escapeHtml(s) {
-      return String(s)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    document.addEventListener("input", (e) => {
-      if (e.target.closest("tbody")) clearValidationErrorsUI();
-    });
-
-    document.addEventListener("change", (e) => {
-      if (e.target.closest("tbody")) clearValidationErrorsUI();
-    });
-
-    async function submitTimesheet() {
-          // ---- UI helpers (safe even if elements missing) ----
-          function getValidationBox() {
-            return document.getElementById("validationBox");
+        function clearValidationUI() {
+          const box = getValidationBox();
+          if (box) {
+            box.style.display = "none";
+            box.innerHTML = "";
           }
 
-          function clearValidationUI() {
-            const box = getValidationBox();
-            if (box) {
-              box.style.display = "none";
-              box.innerHTML = "";
-            }
+          document.querySelectorAll("tbody tr").forEach(tr => {
+            tr.classList.remove("row-error");
+            tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+          });
+        }
 
-            document.querySelectorAll("tbody tr").forEach(tr => {
-              tr.classList.remove("row-error");
-              tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
-            });
+        function showValidationErrorsUI(errors) {
+          const msgs = Array.isArray(errors) ? errors : [String(errors)];
+          const box = getValidationBox();
+
+          // Render panel
+          if (box) {
+            box.innerHTML = `
+              <div><b>Please fix the following before submitting:</b></div>
+              <ul>${msgs.map(m => `<li>${escapeHtml(m)}</li>`).join("")}</ul>
+            `;
+            box.style.display = "block";
+            box.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            console.warn("validationBox not found; falling back to console.");
+            console.warn(msgs);
           }
 
-          function escapeHtml(s) {
-            return String(s)
-              .replaceAll("&", "&amp;")
-              .replaceAll("<", "&lt;")
-              .replaceAll(">", "&gt;")
-              .replaceAll('"', "&quot;")
-              .replaceAll("'", "&#039;");
-          }
+          // Highlight rows/fields based on your error format:
+          // "Row 3 (Mon): Project is required."
+          const trs = Array.from(document.querySelectorAll("tbody tr"));
 
-          function showValidationErrorsUI(errors) {
-            const msgs = Array.isArray(errors) ? errors : [String(errors)];
-            const box = getValidationBox();
+          for (const msg of msgs) {
+            const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
+            if (!m) continue;
 
-            // Render panel
-            if (box) {
-              box.innerHTML = `
-                <div><b>Please fix the following before submitting:</b></div>
-                <ul>${msgs.map(m => `<li>${escapeHtml(m)}</li>`).join("")}</ul>
-              `;
-              box.style.display = "block";
-              box.scrollIntoView({ behavior: "smooth", block: "start" });
-            } else {
-              // fallback
-              console.warn("validationBox not found; falling back to console.");
-              console.warn(msgs);
-            }
+            const rowNum = Number(m[1]);        // 1-based
+            const idx = rowNum - 1;             // 0-based
+            const detail = (m[3] || "").toLowerCase();
 
-            // Highlight rows/fields based on your error format:
-            // "Row 3 (Mon): Project is required."
-            const trs = Array.from(document.querySelectorAll("tbody tr"));
+            const tr = trs[idx];
+            if (!tr) continue;
 
-            for (const msg of msgs) {
-              const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
-              if (!m) continue;
+            tr.classList.add("row-error");
 
-              const rowNum = Number(m[1]);        // 1-based
-              const idx = rowNum - 1;             // 0-based
-              const detail = (m[3] || "").toLowerCase();
-
-              const tr = trs[idx];
-              if (!tr) continue;
-
-              tr.classList.add("row-error");
-
-              // Field-level highlighting (based on text)
-              if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
-              if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
-              if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
-              if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
-            }
-          }
-
-          // ---- start submit ----
-          clearValidationUI();
-
-          const submitBtn = document.getElementById("btnSubmit");
-          if (submitBtn) submitBtn.disabled = true;
-
-          try {
-            // Ensure weekends are auto-filled before validate & submit
-            autoFillWeekends();
-
-            const rows = collectRowsFromUI();
-
-            // Ensure dayName exists for server weekend rule + your validator
-            const trs = document.querySelectorAll("tbody tr");
-            for (let i = 0; i < trs.length; i++) {
-              rows[i].dayName = trs[i].children[1]?.textContent?.trim() || "";
-            }
-
-            const errors = validateRowsClient(rows);
-            if (errors.length) {
-              showValidationErrorsUI(errors);
-              return;
-            }
-
-            const url = `/timesheets/<%= timesheetId %>/submit`;
-
-            // Timeout protection (15s)
-            const controller = new AbortController();
-            const t = setTimeout(() => controller.abort(), 15000);
-
-            const resp = await fetch(url, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-              },
-              body: JSON.stringify({ weekEnding: "<%= weekEnding %>", rows }),
-              signal: controller.signal
-            });
-
-            clearTimeout(t);
-
-            const ct = resp.headers.get("content-type") || "";
-            const raw = await resp.text();
-
-            if (!resp.ok) {
-              let msg = "Submit failed.";
-              if (ct.includes("application/json")) {
-                try { msg = (JSON.parse(raw)?.message) || msg; } catch {}
-              } else {
-                msg = raw || msg;
-              }
-              showValidationErrorsUI([msg]);
-              return;
-            }
-
-            // Success
-            window.location.href = "/timesheets";
-
-          } catch (err) {
-            const msg =
-              err?.name === "AbortError"
-                ? "Submit timed out. Please try again (server may be busy)."
-                : (err?.message || String(err));
-
-            showValidationErrorsUI([msg]);
-            console.error("submitTimesheet error:", err);
-          } finally {
-            if (submitBtn) submitBtn.disabled = false;
+            if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
+            if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
+            if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
+            if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
           }
         }
 
-      
+        // ---- start submit ----
+        clearValidationUI();
+
+        const submitBtn = document.getElementById("btnSubmit");
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+          // Ensure weekends are auto-filled before validate & submit
+          autoFillWeekends();
+
+          const rows = collectRowsFromUI();
+
+          // Ensure dayName exists for server weekend rule + your validator
+          const trs = document.querySelectorAll("tbody tr");
+          for (let i = 0; i < trs.length; i++) {
+            rows[i].dayName = trs[i].children[1]?.textContent?.trim() || "";
+          }
+
+          const errors = validateRowsClient(rows);
+          if (errors.length) {
+            showValidationErrorsUI(errors);
+            return;
+          }
+
+          const url = `/timesheets/<%= timesheetId %>/submit`;
+
+          // Timeout protection (15s)
+          const controller = new AbortController();
+          const t = setTimeout(() => controller.abort(), 15000);
+
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
+            body: JSON.stringify({ weekEnding: "<%= weekEnding %>", rows }),
+            signal: controller.signal
+          });
+
+          clearTimeout(t);
+
+          const ct = resp.headers.get("content-type") || "";
+          const raw = await resp.text();
+
+          if (!resp.ok) {
+            let msg = "Submit failed.";
+            if (ct.includes("application/json")) {
+              try { msg = (JSON.parse(raw)?.message) || msg; } catch {}
+            } else {
+              msg = raw || msg;
+            }
+            showValidationErrorsUI([msg]);
+            return;
+          }
+
+          // Success
+          window.location.href = "/timesheets";
+
+        } catch (err) {
+          const msg =
+            err?.name === "AbortError"
+              ? "Submit timed out. Please try again (server may be busy)."
+              : (err?.message || String(err));
+
+          showValidationErrorsUI([msg]);
+          console.error("submitTimesheet error:", err);
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+        }
+      }
+
       function save() {
         const trs = document.querySelectorAll("tbody tr");
         const ids = <%- JSON.stringify(days.map(x => x.TimesheetDayId)) %>;
@@ -440,28 +463,123 @@
             return;
           }
 
-
           // ✅ After a successful save draft, hide the submit validation error
           clearValidationAlert();
 
-           // ✅ show success confirmation
+          // ✅ show success confirmation
           showSaveSuccess("Saved successfully.");
-
         });
       }
     </script>
+
   <% } else { %>
+    <!-- ===================== -->
+    <!-- Approver Review / Edit -->
+    <!-- ===================== -->
     <div class="filter-container" style="margin-top:16px;">
       <form method="post" action="/approvals/<%= approvalId %>/approve" class="inline-form">
         <button class="btn-primary" type="submit">Approve</button>
       </form>
 
-      <form method="post" action="/approvals/<%= approvalId %>/reject" class="inline-form">
-        <input name="comment" placeholder="Rejection comment (required)" style="min-width:320px"/>
-        <button class="btn-danger" type="submit">Reject</button>
+      <!-- ✅ Reject uses fetch so validation stays on same page -->
+      <form id="rejectForm" class="inline-form" onsubmit="return rejectApproval(event);">
+        <input
+          id="rejectComment"
+          name="comment"
+          placeholder="Rejection comment (required)"
+          style="min-width:320px"
+        />
+        <button id="btnReject" class="btn-danger" type="submit">Reject</button>
       </form>
 
       <a href="/approvals" class="back-link">Back</a>
     </div>
+
+    <script>
+      function escapeHtml2(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function clearApprovalValidationBox() {
+        const box = document.getElementById("validationBox");
+        if (box) {
+          box.style.display = "none";
+          box.innerHTML = "";
+        }
+      }
+
+      function showApprovalError(msg) {
+        const box = document.getElementById("validationBox");
+        if (!box) {
+          alert(msg);
+          return;
+        }
+
+        box.innerHTML = `
+          <div><b>Please fix the following:</b></div>
+          <ul><li>${escapeHtml2(msg)}</li></ul>
+        `;
+        box.style.display = "block";
+        box.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      async function rejectApproval(e) {
+        e.preventDefault();
+        clearApprovalValidationBox();
+
+        const commentEl = document.getElementById("rejectComment");
+        const comment = String(commentEl?.value || "").trim();
+
+        // Client-side required validation (instant)
+        if (!comment) {
+          showApprovalError("Rejection comment required.");
+          commentEl?.focus();
+          return false;
+        }
+
+        const btn = document.getElementById("btnReject");
+        if (btn) btn.disabled = true;
+
+        try {
+          const resp = await fetch(`/approvals/<%= approvalId %>/reject`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
+            body: JSON.stringify({ comment })
+          });
+
+          const ct = resp.headers.get("content-type") || "";
+          const raw = await resp.text();
+
+          if (!resp.ok) {
+            let msg = raw || "Reject failed.";
+            if (ct.includes("application/json")) {
+              try {
+                const j = JSON.parse(raw);
+                msg = j?.error || j?.message || msg;
+              } catch {}
+            }
+            showApprovalError(msg);
+            return false;
+          }
+
+          window.location.href = "/approvals";
+          return false;
+
+        } catch (err) {
+          showApprovalError(err?.message || "Reject failed due to network/server error.");
+          return false;
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      }
+    </script>
   <% } %>
 </div>

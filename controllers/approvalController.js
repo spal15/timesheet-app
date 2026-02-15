@@ -58,21 +58,33 @@ async function approve(req, res) {
 }
 
 async function reject(req, res) {
-  const approvalId = Number(req.params.approvalId);
-  if (!Number.isInteger(approvalId) || approvalId <= 0) return res.status(400).send("Invalid ApprovalId.");
+  try {
+    const approvalId = Number(req.params.approvalId);
+    if (!Number.isInteger(approvalId) || approvalId <= 0) {
+      return res.status(400).json({ error: "Invalid ApprovalId." });
+    }
 
-  const comment = String(req.body.comment || "").trim();
-  if (!comment) return res.status(400).send("Rejection comment required.");
+    const comment = String(req.body?.comment || "").trim();
+    if (!comment) {
+      return res.status(400).json({ error: "Rejection comment required." });
+    }
 
-  const approval = await approvalService.getApprovalById(approvalId);
-  if (!approval) return res.status(404).send("Approval not found");
-  if (req.user.Role !== "Admin" && approval.ApproverUserId !== req.user.UserId) return res.status(403).send("Forbidden");
+    const approval = await approvalService.getApprovalById(approvalId);
+    if (!approval) return res.status(404).json({ error: "Approval not found" });
 
-  await approvalService.setApprovalStatus(approvalId, "Rejected", comment);
-  await timesheetService.addAudit(approval.TimesheetId, req.user.UserId, "Rejected", comment);
-  await approvalService.recomputeTimesheetFinalStatus(approval.TimesheetId);
+    if (req.user.Role !== "Admin" && approval.ApproverUserId !== req.user.UserId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
-  return res.redirect("/approvals");
+    await approvalService.setApprovalStatus(approvalId, "Rejected", comment);
+    await timesheetService.addAudit(approval.TimesheetId, req.user.UserId, "Rejected", comment);
+    await approvalService.recomputeTimesheetFinalStatus(approval.TimesheetId);
+
+    return res.json({ ok: true, redirect: "/approvals" });
+  } catch (e) {
+    console.error("reject error", e);
+    return res.status(500).json({ error: "Server error rejecting approval." });
+  }
 }
 
 /**

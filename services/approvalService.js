@@ -1,6 +1,27 @@
 // services/approvalService.js
 const { getPool, sql } = require("../db/db");
 
+async function listRejectedProjectApprovals(timesheetId) {
+  const pool = await getPool();
+  const r = await pool.request()
+    .input("TimesheetId", sql.Int, timesheetId)
+    .query(`
+      SELECT
+        tpa.TimesheetProjectApprovalId,
+        tpa.ProjectId,
+        p.ProjectName,
+        tpa.Comment,
+        tpa.ActionAt
+      FROM dbo.TimesheetProjectApprovals tpa
+      LEFT JOIN dbo.Projects p ON p.ProjectId = tpa.ProjectId
+      WHERE tpa.TimesheetId = @TimesheetId
+        AND tpa.Status = 'Rejected'
+        AND NULLIF(LTRIM(RTRIM(tpa.Comment)), '') IS NOT NULL
+      ORDER BY tpa.ActionAt DESC, tpa.CreatedAt DESC;
+    `);
+
+  return r.recordset;
+}
 /**
  * Returns everything needed to render the review page for a given TimesheetId:
  * - Timesheet header/vendor/status
@@ -272,5 +293,6 @@ module.exports = {
   listProjectDaysForApproval,
   setApprovalStatus,
   recomputeTimesheetFinalStatus,
-  getTimesheetForReview
+  getTimesheetForReview,
+  listRejectedProjectApprovals
 };

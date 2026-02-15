@@ -41,7 +41,7 @@ async function editTimesheet(req, res) {
       ? "Invalid week ending date format. Please select a date."
       : "Selected week ending date is not allowed. Please select the correct week ending day.";
     const weekEnding = String(req.query.weekEnding || "").trim(); // optional prefill
-  
+
     return res.status(400).render("timesheets", { rows, weekEnding, error: msg, errors: [] });
   }
 
@@ -53,12 +53,19 @@ async function editTimesheet(req, res) {
 
   const projects = await projectService.listActiveProjects();
 
+  // ✅ NEW: load rejection comments (project-level) if rejected
+  let rejectedProjects = [];
+  if (String(header.Status) === "Rejected") {
+    rejectedProjects = await approvalService.listRejectedProjectApprovals(timesheetId);
+  }
+
   return res.render("timesheet_edit", {
     timesheetId,
     weekEnding,
     status: header.Status,
     days,
     projects,
+    rejectedProjects, // ✅ pass to EJS
     error: null
   });
 }
