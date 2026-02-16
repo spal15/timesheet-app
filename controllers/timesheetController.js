@@ -37,12 +37,17 @@ async function editTimesheet(req, res) {
   // ✅ Server-side validation for date picker input
   if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
     const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
+
     const msg = !isValidISODate(weekEnding)
       ? "Invalid week ending date format. Please select a date."
       : "Selected week ending date is not allowed. Please select the correct week ending day.";
-    const weekEnding = String(req.query.weekEnding || "").trim(); // optional prefill
 
-    return res.status(400).render("timesheets", { rows, weekEnding, error: msg, errors: [] });
+    return res.status(400).render("timesheets", {
+      rows,
+      weekEnding,
+      error: msg,
+      errors: []
+    });
   }
 
   const timesheetId = await timesheetService.upsertTimesheetHeader(req.user.UserId, weekEnding);

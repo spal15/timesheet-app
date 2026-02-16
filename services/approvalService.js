@@ -239,50 +239,67 @@ async function setApprovalStatus(approvalId, status, comment) {
 async function recomputeTimesheetFinalStatus(timesheetId) {
   const pool = await getPool();
 
-  const anyRejected = await pool.request()
+  // Get counts in one round-trip
+  const counts = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .query(`
-      SELECT COUNT(1) AS Cnt
+      SELECT
+        SUM(CASE WHEN Status = 'Pending'  THEN 1 ELSE 0 END) AS PendingCnt,
+        SUM(CASE WHEN Status = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCnt,
+        COUNT(1) AS TotalCnt
       FROM dbo.TimesheetProjectApprovals
-      WHERE TimesheetId=@TimesheetId AND Status='Rejected'
+      WHERE TimesheetId = @TimesheetId
     `);
 
-  if (anyRejected.recordset[0].Cnt > 0) {
+  const row = counts.recordset[0] || { PendingCnt: 0, RejectedCnt: 0, TotalCnt: 0 };
+  const pendingCnt = Number(row.PendingCnt || 0);
+  const rejectedCnt = Number(row.RejectedCnt || 0);
+  const totalCnt = Number(row.TotalCnt || 0);
+
+  // If nothing to compute, do nothing
+  if (totalCnt <= 0) return;
+
+  // ✅ KEY FIX:
+  // If any approvals are still pending, the timesheet is NOT final (do not mark Rejected/Approved yet)
+  if (pendingCnt > 0) {
     await pool.request()
       .input("TimesheetId", sql.Int, timesheetId)
       .query(`
         UPDATE dbo.Timesheets
-        SET Status='Rejected', RejectedAt=SYSUTCDATETIME(), UpdatedAt=SYSUTCDATETIME()
-        WHERE TimesheetId=@TimesheetId
+        SET
+          Status = 'Submitted',
+          UpdatedAt = SYSUTCDATETIME()
+        WHERE TimesheetId = @TimesheetId
       `);
     return;
   }
 
-  const pending = await pool.request()
-    .input("TimesheetId", sql.Int, timesheetId)
-    .query(`
-      SELECT COUNT(1) AS Cnt
-      FROM dbo.TimesheetProjectApprovals
-      WHERE TimesheetId=@TimesheetId AND Status='Pending'
-    `);
-
-  const total = await pool.request()
-    .input("TimesheetId", sql.Int, timesheetId)
-    .query(`
-      SELECT COUNT(1) AS Cnt
-      FROM dbo.TimesheetProjectApprovals
-      WHERE TimesheetId=@TimesheetId
-    `);
-
-  if (total.recordset[0].Cnt > 0 && pending.recordset[0].Cnt === 0) {
+  // No pending left => final state
+  if (rejectedCnt > 0) {
     await pool.request()
       .input("TimesheetId", sql.Int, timesheetId)
       .query(`
         UPDATE dbo.Timesheets
-        SET Status='Approved', ApprovedAt=SYSUTCDATETIME(), UpdatedAt=SYSUTCDATETIME()
-        WHERE TimesheetId=@TimesheetId
+        SET
+          Status = 'Rejected',
+          RejectedAt = SYSUTCDATETIME(),
+          UpdatedAt = SYSUTCDATETIME()
+        WHERE TimesheetId = @TimesheetId
       `);
+    return;
   }
+
+  // No pending and no rejected => approved
+  await pool.request()
+    .input("TimesheetId", sql.Int, timesheetId)
+    .query(`
+      UPDATE dbo.Timesheets
+      SET
+        Status = 'Approved',
+        ApprovedAt = SYSUTCDATETIME(),
+        UpdatedAt = SYSUTCDATETIME()
+      WHERE TimesheetId = @TimesheetId
+    `);
 }
 
 module.exports = {
