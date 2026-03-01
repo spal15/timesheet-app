@@ -218,10 +218,34 @@ async function submitTimesheet(req, res) {
     });
   }
 
+  // Save days first (so DB is consistent with what was submitted)
   await timesheetService.updateTimesheetDaysEditable(timesheetId, rows);
 
-  const usedProjectNames = [...new Set(rows.map(r => String(r.projectName || "").trim()).filter(Boolean))];
+  // ✅ NEW RULE:
+  // Create project approvals ONLY for projects that have >0 TOTAL hours across the week.
+  // This naturally excludes weekend "Non-Working" 0 hours (and any other 0-hour-only project).
+  const hoursByProject = new Map();
+  for (const r of rows) {
+    const projectName = String(r.projectName || "").trim();
+    const hours = Number(r.hours);
 
+    if (!projectName) continue;
+    if (!Number.isFinite(hours)) continue;
+
+    hoursByProject.set(projectName, (hoursByProject.get(projectName) || 0) + hours);
+  }
+
+  const usedProjectNames = [...hoursByProject.entries()]
+    .filter(([_, totalHours]) => Number(totalHours) > 0)
+    .map(([projectName]) => projectName);
+
+  // OPTIONAL: if you want to ALWAYS exclude Non-Working even if someone puts hours > 0,
+  // uncomment this:
+  // const usedProjectNames = [...hoursByProject.entries()]
+  //   .filter(([projectName, totalHours]) => Number(totalHours) > 0 && projectName !== "Non-Working")
+  //   .map(([projectName]) => projectName);
+
+  // Validate mapping only for projects that need approval
   for (const projectName of usedProjectNames) {
     const mapping = await projectService.getProjectMappingByName(projectName);
     if (!mapping) {
@@ -239,6 +263,7 @@ async function submitTimesheet(req, res) {
     }
   }
 
+  // Clear old tasks and recreate based on filtered projects
   await approvalService.clearApprovalTasks(timesheetId);
 
   for (const projectName of usedProjectNames) {

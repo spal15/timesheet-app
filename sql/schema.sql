@@ -110,3 +110,198 @@ JOIN dbo.Users u ON u.Email =
     WHEN 'NY_NJ Rollout'  THEN 'lead1@local'
     WHEN 'Non-Working'        THEN 'lead2@local'
   END;
+
+
+/* =========================
+   1) Master tables
+   ========================= */
+
+IF OBJECT_ID('dbo.Vendors','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.Vendors (
+        VendorId   INT IDENTITY(1,1) CONSTRAINT PK_Vendors PRIMARY KEY,
+        VendorName NVARCHAR(200) NOT NULL,
+        IsActive   BIT NOT NULL CONSTRAINT DF_Vendors_IsActive DEFAULT 1,
+        CreatedOn  DATETIME2(0) NOT NULL CONSTRAINT DF_Vendors_CreatedOn DEFAULT SYSDATETIME()
+    );
+
+    CREATE UNIQUE INDEX UX_Vendors_VendorName ON dbo.Vendors(VendorName);
+END
+GO
+
+IF OBJECT_ID('dbo.Teams','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.Teams (
+        TeamId   INT IDENTITY(1,1) CONSTRAINT PK_Teams PRIMARY KEY,
+        TeamName NVARCHAR(100) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_Teams_IsActive DEFAULT 1
+    );
+
+    CREATE UNIQUE INDEX UX_Teams_TeamName ON dbo.Teams(TeamName);
+END
+GO
+
+IF OBJECT_ID('dbo.SubTeams','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SubTeams (
+        SubTeamId   INT IDENTITY(1,1) CONSTRAINT PK_SubTeams PRIMARY KEY,
+        TeamId      INT NOT NULL,
+        SubTeamName NVARCHAR(100) NOT NULL,
+        IsActive    BIT NOT NULL CONSTRAINT DF_SubTeams_IsActive DEFAULT 1,
+
+        CONSTRAINT FK_SubTeams_Teams
+            FOREIGN KEY (TeamId) REFERENCES dbo.Teams(TeamId)
+    );
+
+    -- Unique per Team (same subteam name can exist in another team if you ever want, but usually won’t)
+    CREATE UNIQUE INDEX UX_SubTeams_Team_SubTeamName ON dbo.SubTeams(TeamId, SubTeamName);
+END
+GO
+
+
+/* =========================
+   2) Seed baseline Vendors/Teams/SubTeams
+   Edit as needed
+   ========================= */
+
+-- Vendors
+MERGE dbo.Vendors AS tgt
+USING (VALUES
+    (N'LTM'),
+    (N'ValueMomemtum'),
+    (N'JBK'),
+	(N'Invenger'),
+	(N'EY'),
+	(N'DuckCreek'),
+	(N'Optimetech')
+) AS src(VendorName)
+ON tgt.VendorName = src.VendorName
+WHEN NOT MATCHED THEN
+    INSERT (VendorName) VALUES (src.VendorName);
+
+-- Teams
+MERGE dbo.Teams AS tgt
+USING (VALUES
+    (N'SlideWire'),
+    (N'Violet'),
+    (N'Digital'),
+    (N'Infrastructure')
+) AS src(TeamName)
+ON tgt.TeamName = src.TeamName
+WHEN NOT MATCHED THEN
+    INSERT (TeamName) VALUES (src.TeamName);
+
+-- SubTeams: BA / QA / Dev for each team you care about
+DECLARE @PolicyTeamId INT = (SELECT TeamId FROM dbo.Teams WHERE TeamName = N'Violet');
+DECLARE @ClaimsTeamId INT = (SELECT TeamId FROM dbo.Teams WHERE TeamName = N'SlideWire');
+
+IF @PolicyTeamId IS NOT NULL
+BEGIN
+    MERGE dbo.SubTeams AS tgt
+    USING (VALUES
+        (@PolicyTeamId, N'BA'),
+        (@PolicyTeamId, N'QA'),
+        (@PolicyTeamId, N'Dev')
+    ) AS src(TeamId, SubTeamName)
+    ON tgt.TeamId = src.TeamId AND tgt.SubTeamName = src.SubTeamName
+    WHEN NOT MATCHED THEN
+        INSERT (TeamId, SubTeamName) VALUES (src.TeamId, src.SubTeamName);
+END
+
+IF @ClaimsTeamId IS NOT NULL
+BEGIN
+    MERGE dbo.SubTeams AS tgt
+    USING (VALUES
+        (@ClaimsTeamId, N'BA'),
+        (@ClaimsTeamId, N'QA'),
+        (@ClaimsTeamId, N'Dev')
+    ) AS src(TeamId, SubTeamName)
+    ON tgt.TeamId = src.TeamId AND tgt.SubTeamName = src.SubTeamName
+    WHEN NOT MATCHED THEN
+        INSERT (TeamId, SubTeamName) VALUES (src.TeamId, src.SubTeamName);
+END
+GO
+
+/* =========================
+   3) Users table enhancement
+   ========================= */
+
+-- Add columns (nullable for safe rollout)
+IF COL_LENGTH('dbo.Users','VendorId') IS NULL
+    ALTER TABLE dbo.Users ADD VendorId INT NULL;
+
+IF COL_LENGTH('dbo.Users','TeamId') IS NULL
+    ALTER TABLE dbo.Users ADD TeamId INT NULL;
+
+IF COL_LENGTH('dbo.Users','SubTeamId') IS NULL
+    ALTER TABLE dbo.Users ADD SubTeamId INT NULL;
+GO
+
+-- Add foreign keys (only if not exists)
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Users_Vendors')
+BEGIN
+    ALTER TABLE dbo.Users
+    ADD CONSTRAINT FK_Users_Vendors
+        FOREIGN KEY (VendorId) REFERENCES dbo.Vendors(VendorId);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Users_Teams')
+BEGIN
+    ALTER TABLE dbo.Users
+    ADD CONSTRAINT FK_Users_Teams
+        FOREIGN KEY (TeamId) REFERENCES dbo.Teams(TeamId);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Users_SubTeams')
+BEGIN
+    ALTER TABLE dbo.Users
+    ADD CONSTRAINT FK_Users_SubTeams
+        FOREIGN KEY (SubTeamId) REFERENCES dbo.SubTeams(SubTeamId);
+END
+GO
+
+-- Helpful indexes
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_VendorId' AND object_id = OBJECT_ID('dbo.Users'))
+    CREATE INDEX IX_Users_VendorId ON dbo.Users(VendorId);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_TeamId' AND object_id = OBJECT_ID('dbo.Users'))
+    CREATE INDEX IX_Users_TeamId ON dbo.Users(TeamId);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_SubTeamId' AND object_id = OBJECT_ID('dbo.Users'))
+    CREATE INDEX IX_Users_SubTeamId ON dbo.Users(SubTeamId);
+GO
+
+
+/* =========================
+   4) Project + SubTeam approver mapping
+   ========================= */
+
+IF OBJECT_ID('dbo.ProjectSubTeamApprovers','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ProjectSubTeamApprovers (
+        ProjectSubTeamApproverId INT IDENTITY(1,1) CONSTRAINT PK_ProjectSubTeamApprovers PRIMARY KEY,
+        ProjectId    INT NOT NULL,
+        SubTeamId    INT NOT NULL,
+        ApproverEmail NVARCHAR(320) NOT NULL,     -- keep simple + resilient
+        IsActive     BIT NOT NULL CONSTRAINT DF_PSTA_IsActive DEFAULT 1,
+        IsPrimary    BIT NOT NULL CONSTRAINT DF_PSTA_IsPrimary DEFAULT 0,
+        ApprovalOrder INT NULL,                   -- optional: sequential approvals
+        CreatedOn    DATETIME2(0) NOT NULL CONSTRAINT DF_PSTA_CreatedOn DEFAULT SYSDATETIME(),
+
+        -- If you have dbo.Projects with ProjectId PK
+        CONSTRAINT FK_PSTA_Projects FOREIGN KEY (ProjectId) REFERENCES dbo.Projects(ProjectId),
+
+        CONSTRAINT FK_PSTA_SubTeams FOREIGN KEY (SubTeamId) REFERENCES dbo.SubTeams(SubTeamId)
+    );
+
+    -- prevent duplicate approver rows for same project/subteam
+    CREATE UNIQUE INDEX UX_PSTA_Project_SubTeam_Approver
+        ON dbo.ProjectSubTeamApprovers(ProjectId, SubTeamId, ApproverEmail);
+
+    CREATE INDEX IX_PSTA_Project_SubTeam
+        ON dbo.ProjectSubTeamApprovers(ProjectId, SubTeamId)
+        INCLUDE (ApproverEmail, IsPrimary, ApprovalOrder, IsActive);
+END
+GO
