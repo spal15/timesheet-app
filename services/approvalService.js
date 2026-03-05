@@ -11,7 +11,9 @@ async function listRejectedProjectApprovals(timesheetId) {
         tpa.ProjectId,
         p.ProjectName,
         tpa.Comment,
-        tpa.ActionAt
+        tpa.ActionAt,
+        tpa.VendorReply,
+        tpa.VendorReplyAt
       FROM dbo.TimesheetProjectApprovals tpa
       LEFT JOIN dbo.Projects p ON p.ProjectId = tpa.ProjectId
       WHERE tpa.TimesheetId = @TimesheetId
@@ -60,7 +62,9 @@ async function getTimesheetForReview(timesheetId, user) {
       a.ProjectId,
       p.ProjectName,
       a.Status AS ApprovalStatus,
-      a.Comment
+      a.Comment,
+      a.VendorReply,
+      a.VendorReplyAt
     FROM dbo.TimesheetProjectApprovals a
     JOIN dbo.Projects p ON p.ProjectId = a.ProjectId
     WHERE a.TimesheetId = @TimesheetId
@@ -89,6 +93,8 @@ async function getTimesheetForReview(timesheetId, user) {
       projectName: a.ProjectName,
       approvalStatus: a.ApprovalStatus,
       comment: a.Comment,
+      vendorReply: a.VendorReply,
+      vendorReplyAt: a.VendorReplyAt,
       days
     });
   }
@@ -117,8 +123,17 @@ async function createApprovalTask(timesheetId, projectId, approverUserId) {
     .input("ProjectId", sql.Int, projectId)
     .input("ApproverUserId", sql.Int, approverUserId)
     .query(`
-      INSERT INTO dbo.TimesheetProjectApprovals (TimesheetId, ProjectId, ApproverUserId, Status)
-      VALUES (@TimesheetId, @ProjectId, @ApproverUserId, 'Pending')
+      IF NOT EXISTS (
+        SELECT 1
+        FROM dbo.TimesheetProjectApprovals
+        WHERE TimesheetId = @TimesheetId
+          AND ProjectId = @ProjectId
+          AND ApproverUserId = @ApproverUserId
+      )
+      BEGIN
+        INSERT INTO dbo.TimesheetProjectApprovals (TimesheetId, ProjectId, ApproverUserId, Status)
+        VALUES (@TimesheetId, @ProjectId, @ApproverUserId, 'Pending');
+      END
     `);
 }
 
@@ -166,7 +181,8 @@ async function getApprovalById(approvalId) {
         tpa.ApproverUserId    AS ApproverUserId,
         tpa.Status            AS ApprovalStatus,
         tpa.Comment           AS Comment,
-
+        tpa.VendorReply       AS VendorReply,
+        tpa.VendorReplyAt     AS VendorReplyAt,
         p.ProjectName         AS ProjectName,
         t.WeekEndingDate      AS WeekEndingDate,
         t.Status              AS TimesheetStatus,
@@ -302,6 +318,71 @@ async function recomputeTimesheetFinalStatus(timesheetId) {
     `);
 }
 
+async function getRejectedApprovalForVendor(timesheetProjectApprovalId, vendorUserId) {
+  const pool = await getPool();
+  const r = await pool.request()
+    .input("ApprovalId", sql.Int, timesheetProjectApprovalId)
+    .input("VendorUserId", sql.Int, vendorUserId)
+    .query(`
+      SELECT TOP 1
+        tpa.TimesheetProjectApprovalId,
+        tpa.TimesheetId,
+        tpa.ProjectId,
+        tpa.ApproverUserId,
+        tpa.Status,
+        tpa.Comment,
+        tpa.VendorReply,
+        tpa.VendorReplyAt
+      FROM dbo.TimesheetProjectApprovals tpa
+      JOIN dbo.Timesheets t ON t.TimesheetId = tpa.TimesheetId
+      WHERE tpa.TimesheetProjectApprovalId = @ApprovalId
+        AND t.VendorUserId = @VendorUserId
+        AND tpa.Status = 'Rejected'
+    `);
+  return r.recordset[0] || null;
+}
+
+async function setVendorReply(approvalId, vendorUserId, replyText) {
+  const pool = await getPool();
+  await pool.request()
+    .input("ApprovalId", sql.Int, approvalId)
+    .input("VendorUserId", sql.Int, vendorUserId)
+    .input("Reply", sql.NVarChar(2000), replyText || null)
+    .query(`
+      UPDATE tpa
+      SET
+        VendorReply = @Reply,
+        VendorReplyAt = SYSUTCDATETIME()
+      FROM dbo.TimesheetProjectApprovals tpa
+      JOIN dbo.Timesheets t ON t.TimesheetId = tpa.TimesheetId
+      WHERE tpa.TimesheetProjectApprovalId = @ApprovalId
+        AND t.VendorUserId = @VendorUserId
+        AND tpa.Status = 'Rejected'
+    `);
+}
+
+async function ensureApprovalTask(timesheetId, projectId, approverUserId) {
+  // This is identical to your createApprovalTask; naming makes Option A clearer.
+  return createApprovalTask(timesheetId, projectId, approverUserId);
+}
+
+/**
+ * ✅ When vendor resubmits after rejection:
+ * - keep Comment/ActionAt/VendorReply/VendorReplyAt intact (audit trail)
+ * - simply reopen rejected approvals so approvers can re-review
+ */
+async function reopenApprovalsForResubmission(timesheetId) {
+  const pool = await getPool();
+  await pool.request()
+    .input("TimesheetId", sql.Int, timesheetId)
+    .query(`
+      UPDATE dbo.TimesheetProjectApprovals
+      SET Status = 'Pending'
+      WHERE TimesheetId = @TimesheetId
+        AND Status = 'Rejected';
+    `);
+}
+
 module.exports = {
   clearApprovalTasks,
   createApprovalTask,
@@ -311,5 +392,9 @@ module.exports = {
   setApprovalStatus,
   recomputeTimesheetFinalStatus,
   getTimesheetForReview,
-  listRejectedProjectApprovals
+  listRejectedProjectApprovals,
+  getRejectedApprovalForVendor,
+  setVendorReply,
+  reopenApprovalsForResubmission,
+  ensureApprovalTask
 };

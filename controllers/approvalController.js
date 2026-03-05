@@ -12,6 +12,7 @@ async function viewApproval(req, res) {
   if (!Number.isInteger(approvalId) || approvalId <= 0) return res.status(400).send("Invalid ApprovalId.");
 
   const approval = await approvalService.getApprovalById(approvalId);
+  
   if (!approval) return res.status(404).send("Approval not found");
   if (req.user.Role !== "Admin" && approval.ApproverUserId !== req.user.UserId) return res.status(403).send("Forbidden");
 
@@ -33,8 +34,14 @@ async function viewApproval(req, res) {
     approvalId, // from URL
     projectName: approval.ProjectName,
     vendorName: approval.VendorName,
-    vendorEmail: approval.VendorEmail
+    vendorEmail: approval.VendorEmail,
+     // ✅ NEW: show rejection + vendor response on approver view
+    comment: approval.Comment,
+    vendorReply: approval.VendorReply,
+    vendorReplyAt: approval.VendorReplyAt
   });
+
+  
 }
 
 async function approve(req, res) {
@@ -158,7 +165,11 @@ async function reviewPage(req, res) {
     approvalId: approval.TimesheetProjectApprovalId,
     projectName: approval.ProjectName,
     vendorName: approval.VendorName,
-    vendorEmail: approval.VendorEmail
+    vendorEmail: approval.VendorEmail,
+     // ✅ NEW: show rejection + vendor response on approver view
+    comment: approval.Comment,
+    vendorReply: approval.VendorReply,
+    vendorReplyAt: approval.VendorReplyAt
   });
 }
 

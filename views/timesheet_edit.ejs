@@ -2,20 +2,99 @@
   Timesheet - Week Ending <%= weekEnding %>
   <span class="pill"><%= status %></span>
 </h2>
-<% if (status === "Rejected" && (rejectedProjects || []).length) { %>
+<%
+  const _comment = (typeof comment !== 'undefined') ? comment : null;
+  const _vendorReply = (typeof vendorReply !== 'undefined') ? vendorReply : null;
+  const _vendorReplyAt = (typeof vendorReplyAt !== 'undefined') ? vendorReplyAt : null;
+%>
+<% if (_comment || _vendorReply) { %>
+  <div class="approval-conversation-card">
+
+    <% if (_comment) { %>
+      <div class="approver-comment">
+        <div class="label">Approver Comment</div>
+        <div class="message"><%= _comment %></div>
+      </div>
+    <% } %>
+
+    <% if (_vendorReply) { %>
+      <div class="vendor-reply">
+        <div class="label">Vendor Reply</div>
+        <div class="message"><%= _vendorReply %></div>
+
+        <% if (_vendorReplyAt) { %>
+          <div class="timestamp"><%= new Date(_vendorReplyAt).toLocaleString() %></div>
+        <% } %>
+      </div>
+    <% } %>
+
+  </div>
+<% } %>
+
+<%
+  const rp =
+    (typeof rejectedProjects !== "undefined" && Array.isArray(rejectedProjects))
+      ? rejectedProjects
+      : [];
+
+  const hasVendorReply = rp.some(r => String((r && r.VendorReply) || "").trim().length > 0);
+%>
+
+<% if (hasVendorReply || (status === "Rejected" && rp.length)) { %>
   <div class="alert alert-error" style="margin-top:12px; cursor:pointer;" onclick="toggleRejectDetails()">
     <div class="alert-title" style="display:flex; align-items:center; justify-content:space-between;">
       <span>❌ Rejected <span style="font-weight:normal;">(click to expand)</span></span>
       <span id="rejectChevron" aria-hidden="true">▸</span>
     </div>
 
-    <div id="rejectDetails" class="alert-body" style="display:none; margin-top:8px;">
+    <div id="rejectDetails" class="alert-body" style="display:none; margin-top:8px; cursor:default;" onclick="event.stopPropagation()">
       <div style="margin-bottom:6px;"><b>Rejection details by project:</b></div>
+
       <ul style="margin:0; padding-left:18px;">
-        <% rejectedProjects.forEach(r => { %>
-          <li style="margin-bottom:6px;">
-            <b><%= r.ProjectName %>:</b>
-            <span><%= r.Comment %></span>
+        <% rp.forEach(r => { %>
+          <li style="margin-bottom:14px;">
+            <div>
+              <b><%= r.ProjectName %>:</b>
+              <span><%= r.Comment %></span>
+            </div>
+
+            <div style="margin-top:8px; padding-left:2px;">
+              <% if (r.VendorReply) { %>
+                <div style="margin:6px 0;">
+                  <b>Your Reply:</b>
+                  <span><%= r.VendorReply %></span>
+                  <% if (r.VendorReplyAt) { %>
+                    <span style="opacity:0.7; font-size:0.9em;">
+                      (sent <%= (r.VendorReplyAt instanceof Date ? r.VendorReplyAt.toISOString().slice(0,19).replace('T',' ') : r.VendorReplyAt) %>)
+                    </span>
+                  <% } %>
+                </div>
+              <% } %>
+
+              <textarea
+                id="vendorReply-<%= r.TimesheetProjectApprovalId %>"
+                class="input"
+                rows="2"
+                style="width:100%; max-width:720px;"
+                placeholder="Reply to approver with details (e.g., updated ADO ticket link, more context, screenshots, etc.)"
+              ></textarea>
+
+              <div style="margin-top:6px; display:flex; gap:8px; align-items:center;">
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  id="btnSendReply-<%= r.TimesheetProjectApprovalId %>"
+                  onclick="sendVendorReply(<%= timesheetId %>, <%= r.TimesheetProjectApprovalId %>)"
+                >
+                  Send Reply
+                </button>
+
+                <span
+                  id="replyStatus-<%= r.TimesheetProjectApprovalId %>"
+                  style="font-size:0.9em; opacity:0.85;"
+                ></span>
+              </div>
+            </div>
           </li>
         <% }) %>
       </ul>
@@ -31,6 +110,61 @@
       const open = details.style.display !== "none";
       details.style.display = open ? "none" : "block";
       if (chev) chev.textContent = open ? "▸" : "▾";
+    }
+
+    async function sendVendorReply(timesheetId, approvalId) {
+      const ta = document.getElementById(`vendorReply-${approvalId}`);
+      const btn = document.getElementById(`btnSendReply-${approvalId}`);
+      const status = document.getElementById(`replyStatus-${approvalId}`);
+
+      const reply = String(ta?.value || "").trim();
+      if (!reply) {
+        if (status) status.textContent = "Please enter a reply.";
+        ta?.focus();
+        return;
+      }
+
+      if (btn) btn.disabled = true;
+      if (status) status.textContent = "Sending...";
+
+      try {
+        const resp = await fetch(`/timesheets/${timesheetId}/approvals/${approvalId}/reply`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ reply })
+        });
+
+        const raw = await resp.text();
+        const ct = resp.headers.get("content-type") || "";
+        let message = "Reply sent.";
+
+        if (!resp.ok) {
+          message = raw || "Failed to send reply.";
+          if (ct.includes("application/json")) {
+            try { message = JSON.parse(raw)?.message || message; } catch {}
+          }
+          if (status) status.textContent = message;
+          return;
+        }
+
+        if (ct.includes("application/json")) {
+          try { message = JSON.parse(raw)?.message || message; } catch {}
+        }
+
+        if (status) status.textContent = message;
+        if (ta) ta.value = "";
+
+        // Optional: auto-refresh so user immediately sees the reply rendered
+        // location.reload();
+
+      } catch (err) {
+        if (status) status.textContent = err?.message || "Failed to send reply due to network/server error.";
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
   </script>
 <% } %>
@@ -477,6 +611,7 @@
     <!-- Approver Review / Edit -->
     <!-- ===================== -->
     <div class="filter-container" style="margin-top:16px;">
+      
       <form method="post" action="/approvals/<%= approvalId %>/approve" class="inline-form">
         <button class="btn-primary" type="submit">Approve</button>
       </form>

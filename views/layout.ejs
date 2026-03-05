@@ -28,7 +28,7 @@
 
     <% if (user) { %>
       <span class="back-link right">
-        <%= user.DisplayName %> • <%= user.Email %> • <%= user.Role %>
+        <%= (user.DisplayTitle || user.DisplayName) %> • <%= user.Email %> • <%= user.Role %>
       </span>
     <% } %>
   </div>

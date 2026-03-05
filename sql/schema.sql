@@ -305,3 +305,32 @@ BEGIN
         INCLUDE (ApproverEmail, IsPrimary, ApprovalOrder, IsActive);
 END
 GO
+
+-- Frequent Select
+-- Check users with new attributes
+SELECT TOP 100
+  u.Email, u.DisplayName, u.Role,
+  v.VendorName, t.TeamName, st.SubTeamName
+FROM dbo.Users u
+LEFT JOIN dbo.Vendors v ON u.VendorId = v.VendorId
+LEFT JOIN dbo.Teams t ON u.TeamId = t.TeamId
+LEFT JOIN dbo.SubTeams st ON u.SubTeamId = st.SubTeamId;
+
+-- Check approver mapping for Projects
+SELECT
+  p.ProjectName,
+  tm.TeamName,
+  st.SubTeamName,
+  psta.ApproverEmail,
+  psta.IsPrimary,
+  psta.ApprovalOrder,
+  psta.IsActive
+FROM dbo.ProjectSubTeamApprovers psta
+JOIN dbo.Projects p ON p.ProjectId = psta.ProjectId
+JOIN dbo.SubTeams st ON st.SubTeamId = psta.SubTeamId
+JOIN dbo.Teams tm ON tm.TeamId = st.TeamId
+ORDER BY p.ProjectName, tm.TeamName, st.SubTeamName, psta.ApprovalOrder;
+
+ALTER TABLE dbo.TimesheetProjectApprovals
+ADD VendorReply NVARCHAR(2000) NULL,
+    VendorReplyAt DATETIME2(0) NULL;

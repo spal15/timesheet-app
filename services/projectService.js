@@ -81,10 +81,50 @@ async function listActiveProjects() {
   return r.recordset;
 }
 
+async function getProjectByName(projectName) {
+  const pool = await getPool();
+  const r = await pool.request()
+    .input("ProjectName", sql.NVarChar(200), projectName)
+    .query(`
+      SELECT TOP 1 ProjectId, ProjectName
+      FROM dbo.Projects
+      WHERE ProjectName=@ProjectName AND IsActive=1
+    `);
+  return r.recordset[0] || null;
+}
+
+async function getApproversForProjectAndSubTeam(projectId, subTeamId) {
+  const pool = await getPool();
+  const r = await pool.request()
+    .input("ProjectId", sql.Int, projectId)
+    .input("SubTeamId", sql.Int, subTeamId)
+    .query(`
+      SELECT
+        u.UserId,
+        u.Email,
+        u.DisplayName,
+        psta.IsPrimary,
+        psta.ApprovalOrder
+      FROM dbo.ProjectSubTeamApprovers psta
+      JOIN dbo.Users u
+        ON LOWER(u.Email) = LOWER(psta.ApproverEmail)
+       AND u.IsActive = 1
+      WHERE psta.ProjectId = @ProjectId
+        AND psta.SubTeamId = @SubTeamId
+        AND psta.IsActive = 1
+      ORDER BY COALESCE(psta.ApprovalOrder, 999999),
+               psta.IsPrimary DESC,
+               u.DisplayName;
+    `);
+  return r.recordset || [];
+}
+
 module.exports = {
   listProjectsWithApprovers,
   listApproverUsers,
   upsertProjectAndApprover,
   getProjectMappingByName,
-  listActiveProjects
+  listActiveProjects,
+  getProjectByName,
+  getApproversForProjectAndSubTeam
 };

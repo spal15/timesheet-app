@@ -21,5 +21,7 @@ router.post("/timesheets/:id/save", requireRole("Vendor"), timesheetController.s
 // ✅ Submit-only validation
 router.post("/timesheets/:id/submit", requireRole("Vendor"), timesheetController.submitTimesheet);
 
+router.post("/timesheets/:id/approvals/:approvalId/reply", requireRole("Vendor"), timesheetController.replyToRejection);
+
 module.exports = router;
 

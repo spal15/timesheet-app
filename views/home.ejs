@@ -25,6 +25,21 @@
           <div class="field-value domain-field"><%= user.Role %></div>
         </div>
       </div>
+
+      <div class="key-value">
+        <div class="field-content">
+          <div class="field-label">Team</div>
+          <div class="field-value"><%= user.TeamName || '-' %></div>
+        </div>
+      </div>
+
+      <div class="key-value">
+        <div class="field-content">
+          <div class="field-label">SubTeam</div>
+          <div class="field-value"><%= user.SubTeamName || '-' %></div>
+        </div>
+      </div>
+
     </div>
 
     <div class="entity">

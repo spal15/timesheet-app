@@ -62,6 +62,11 @@ async function requireUser(req, res, next) {
   }
 
   const user = await getUserByEmail(email);
+  user.DisplayTitle = [
+  user.DisplayName,
+  user.TeamName,
+  user.SubTeamName
+  ].filter(Boolean).join(" • ");
 
   if (!user) {
     return res.status(403).send(`User ${email} is not authorized. Add them to dbo.Users.`);
