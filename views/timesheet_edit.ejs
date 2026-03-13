@@ -2,14 +2,79 @@
   Timesheet - Week Ending <%= weekEnding %>
   <span class="pill"><%= status %></span>
 </h2>
+
 <%
   const _comment = (typeof comment !== 'undefined') ? comment : null;
   const _vendorReply = (typeof vendorReply !== 'undefined') ? vendorReply : null;
   const _vendorReplyAt = (typeof vendorReplyAt !== 'undefined') ? vendorReplyAt : null;
+  const _approvalView = (typeof approvalView !== "undefined" && approvalView);
+  const _maxEntriesPerDay = Number(typeof maxEntriesPerDay !== "undefined" ? maxEntriesPerDay : 5);
+
+  const rp =
+    (typeof rejectedProjects !== "undefined" && Array.isArray(rejectedProjects))
+      ? rejectedProjects
+      : [];
+
+  const hasVendorReply = rp.some(r => String((r && r.VendorReply) || "").trim().length > 0);
+
+  function fmtDate(v) {
+    if (!v) return "";
+    try {
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    } catch {
+      return String(v || "");
+    }
+  }
+
+  function isWeekendName(dayName) {
+    return String(dayName || "").toLowerCase().startsWith("sat") ||
+           String(dayName || "").toLowerCase().startsWith("sun");
+  }
+
+  function normalizeEntriesForView(day) {
+    if (Array.isArray(day.entries) && day.entries.length) return day.entries;
+
+    if (_approvalView) {
+      return [{
+        entryId: null,
+        entryOrder: 1,
+        projectName: day.ProjectName || "",
+        workSummary: day.WorkSummary || "",
+        adoTickets: day.ADOTickets || "",
+        hours: day.Hours ?? ""
+      }];
+    }
+
+    if (isWeekendName(day.DayName)) {
+      return [{
+        entryId: null,
+        entryOrder: 1,
+        projectName: "Non-Working",
+        workSummary: "Weekend",
+        adoTickets: "N/A",
+        hours: 0
+      }];
+    }
+
+    return [{
+      entryId: null,
+      entryOrder: 1,
+      projectName: day.ProjectName || "",
+      workSummary: day.WorkSummary || "",
+      adoTickets: day.ADOTickets || "",
+      hours: day.Hours ?? ""
+    }];
+  }
+
+  const daysForView = (Array.isArray(days) ? days : []).map(d => ({
+    ...d,
+    entries: normalizeEntriesForView(d)
+  }));
 %>
+
 <% if (_comment || _vendorReply) { %>
   <div class="approval-conversation-card">
-
     <% if (_comment) { %>
       <div class="approver-comment">
         <div class="label">Approver Comment</div>
@@ -21,24 +86,13 @@
       <div class="vendor-reply">
         <div class="label">Vendor Reply</div>
         <div class="message"><%= _vendorReply %></div>
-
         <% if (_vendorReplyAt) { %>
           <div class="timestamp"><%= new Date(_vendorReplyAt).toLocaleString() %></div>
         <% } %>
       </div>
     <% } %>
-
   </div>
 <% } %>
-
-<%
-  const rp =
-    (typeof rejectedProjects !== "undefined" && Array.isArray(rejectedProjects))
-      ? rejectedProjects
-      : [];
-
-  const hasVendorReply = rp.some(r => String((r && r.VendorReply) || "").trim().length > 0);
-%>
 
 <% if (hasVendorReply || (status === "Rejected" && rp.length)) { %>
   <div class="alert alert-error" style="margin-top:12px; cursor:pointer;" onclick="toggleRejectDetails()">
@@ -156,10 +210,6 @@
 
         if (status) status.textContent = message;
         if (ta) ta.value = "";
-
-        // Optional: auto-refresh so user immediately sees the reply rendered
-        // location.reload();
-
       } catch (err) {
         if (status) status.textContent = err?.message || "Failed to send reply due to network/server error.";
       } finally {
@@ -168,7 +218,6 @@
     }
   </script>
 <% } %>
-
 
 <% if (typeof error !== "undefined" && error) { %>
   <div id="validationAlert" class="alert alert-error">
@@ -184,13 +233,18 @@
   <div class="alert-body">Your timesheet draft has been saved.</div>
 </div>
 
-<!-- Used by BOTH vendor submit validation + approver reject validation -->
 <div id="validationBox" class="validation-box" style="display:none;"></div>
 
 <div class="entity">
-  <div class="entity-name">Entry (One row per day)</div>
+  <div class="entity-name"><%= _approvalView ? "Review" : "Entry (Up to 5 project rows per day)" %></div>
 
-  <table class="diff-table">
+  <% if (!_approvalView) { %>
+    <div style="margin:10px 0 14px 0; font-size:0.95em; opacity:0.9;">
+      You can add up to <b><%= _maxEntriesPerDay %></b> project entries per day. Weekend rows stay auto-filled as Non-Working.
+    </div>
+  <% } %>
+
+  <table class="diff-table" id="timesheetTable">
     <thead>
       <tr>
         <th>Date</th>
@@ -199,61 +253,116 @@
         <th>Work Summary</th>
         <th>ADO Ticket(s)</th>
         <th>Hours</th>
+        <% if (!_approvalView) { %>
+          <th style="min-width:140px;">Add Project</th>
+          <th style="min-width:120px;">Total</th>
+          <th>Action</th>
+        <% } %>
       </tr>
     </thead>
 
     <tbody>
-      <% days.forEach((d, idx) => { %>
-        <tr>
-          <td><%= (d.WorkDate instanceof Date ? d.WorkDate.toISOString().slice(0,10) : d.WorkDate) %></td>
-          <td><%= d.DayName %></td>
+      <% daysForView.forEach((d, dayIdx) => { %>
+        <% const entries = d.entries || []; %>
+        <% entries.forEach((e, entryIdx) => { %>
+          <tr
+            data-day-index="<%= dayIdx %>"
+            data-day-name="<%= d.DayName %>"
+            data-timesheet-day-id="<%= d.TimesheetDayId %>"
+            class="<%= entryIdx === 0 ? 'day-first-row' : 'day-extra-row' %>"
+          >
+            <% if (entryIdx === 0) { %>
+              <td rowspan="<%= entries.length %>" class="day-date-cell">
+                <%= fmtDate(d.WorkDate) %>
+              </td>
+              <td rowspan="<%= entries.length %>" class="day-name-cell">
+                <%= d.DayName %>
+              </td>
+            <% } %>
 
-          <% if (typeof approvalView !== "undefined" && approvalView) { %>
-            <td><%= d.ProjectName || "" %></td>
-            <td><%= d.WorkSummary || "" %></td>
-            <td><%= d.ADOTickets || "" %></td>
-            <td><%= d.Hours %></td>
-          <% } else { %>
+            <% if (_approvalView) { %>
+              <td><%= e.projectName || "" %></td>
+              <td><%= e.workSummary || "" %></td>
+              <td><%= e.adoTickets || "" %></td>
+              <td><%= e.hours %></td>
+            <% } else { %>
+              <td>
+                <select class="input project-select">
+                  <option value="">-- Select Project --</option>
+                  <% (projects || []).forEach(p => { %>
+                    <option
+                      value="<%= p.ProjectName %>"
+                      <%= (String(e.projectName || "") === String(p.ProjectName) ? "selected" : "") %>
+                    >
+                      <%= p.ProjectName %>
+                    </option>
+                  <% }) %>
+                </select>
+              </td>
 
-            <td>
-              <select class="input project-select">
-                <option value="">-- Select Project --</option>
-                <% (projects || []).forEach(p => { %>
-                  <option
-                    value="<%= p.ProjectName %>"
-                    <%= (String(d.ProjectName || "") === String(p.ProjectName) ? "selected" : "") %>
+              <td><input class="input work-summary" type="text" value="<%= e.workSummary || '' %>"></td>
+              <td><input class="input ado-tickets" type="text" value="<%= e.adoTickets || '' %>"></td>
+              <td><input class="input hours" type="number" step="0.25" min="0" max="24" value="<%= e.hours %>"></td>
+
+              <% if (entryIdx === 0) { %>
+                <td rowspan="<%= entries.length %>" class="day-add-project-cell" style="vertical-align:top;">
+                  <button
+                    type="button"
+                    class="btn-secondary btn-add-project"
+                    onclick="addProjectRow(<%= dayIdx %>)"
                   >
-                    <%= p.ProjectName %>
-                  </option>
-                <% }) %>
-              </select>
-            </td>
+                    + Add Project
+                  </button>
+                </td>
 
-            <td><input class="input work-summary" type="text" value="<%= d.WorkSummary || '' %>"></td>
-            <td><input class="input ado-tickets" type="text" value="<%= d.ADOTickets || '' %>"></td>
-            <td><input class="input hours" type="number" step="0.25" min="0" max="24" value="<%= d.Hours %>"></td>
+                <td rowspan="<%= entries.length %>" class="day-total-cell" data-day-total-for="<%= dayIdx %>" style="vertical-align:top; font-weight:600; white-space:nowrap;">
+                  Day Total: <span class="day-total-value">0.00</span>
+                </td>
+              <% } %>
 
-          <% } %>
-        </tr>
+              <td>
+                <button type="button" class="btn-danger btn-remove-project" onclick="removeProjectRow(this)">Remove</button>
+              </td>
+            <% } %>
+          </tr>
+        <% }) %>
       <% }) %>
     </tbody>
   </table>
 
-  <% if (!(typeof approvalView !== "undefined" && approvalView)) { %>
-    <!-- ========================= -->
-    <!-- Vendor Edit / Submit View -->
-    <!-- ========================= -->
+  <% if (!_approvalView) { %>
     <div class="filter-container" style="margin-top:16px;">
       <button class="btn-secondary" type="button" onclick="save()">Save Draft</button>
 
-      <button id="btnSubmit" class="btn-primary" type="button" onclick="submitTimesheet(<%= timesheetId %>)">
+      <button id="btnSubmit" class="btn-primary" type="button" onclick="submitTimesheet()">
         Submit
       </button>
 
       <a href="/timesheets" class="back-link">Back</a>
     </div>
 
+    <template id="projectRowTemplate">
+      <tr data-day-index="" data-day-name="" data-timesheet-day-id="" class="day-extra-row">
+        <td>
+          <select class="input project-select">
+            <option value="">-- Select Project --</option>
+            <% (projects || []).forEach(p => { %>
+              <option value="<%= p.ProjectName %>"><%= p.ProjectName %></option>
+            <% }) %>
+          </select>
+        </td>
+        <td><input class="input work-summary" type="text" value=""></td>
+        <td><input class="input ado-tickets" type="text" value=""></td>
+        <td><input class="input hours" type="number" step="0.25" min="0" max="24" value=""></td>
+        <td><button type="button" class="btn-danger btn-remove-project" onclick="removeProjectRow(this)">Remove</button></td>
+      </tr>
+    </template>
+
     <script>
+      const TIMESHEET_ID = <%= timesheetId %>;
+      const WEEK_ENDING = "<%= weekEnding %>";
+      const MAX_ENTRIES_PER_DAY = <%= _maxEntriesPerDay %>;
+
       function clearValidationAlert() {
         const el = document.getElementById("validationAlert");
         if (el) el.style.display = "none";
@@ -267,12 +376,19 @@
         if (body) body.textContent = message || "Your timesheet draft has been saved.";
 
         el.style.display = "block";
-
-        // auto-hide after 3 seconds
         window.clearTimeout(window.__saveSuccessTimer);
         window.__saveSuccessTimer = window.setTimeout(() => {
           el.style.display = "none";
         }, 3000);
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
       }
 
       function isWeekendDayName(dayName) {
@@ -280,11 +396,67 @@
         return d.startsWith("sat") || d.startsWith("sun");
       }
 
-      function autoFillWeekends() {
-        const trs = document.querySelectorAll("tbody tr");
+      function getDayRows(dayIndex) {
+        return Array.from(document.querySelectorAll(`tr[data-day-index="${dayIndex}"]`));
+      }
 
-        for (const tr of trs) {
-          const dayName = tr.children[1]?.textContent?.trim(); // column 2 = Day
+      function getDateCell(dayIndex) {
+        return document.querySelector(`tr[data-day-index="${dayIndex}"] .day-date-cell`);
+      }
+
+      function getDayNameCell(dayIndex) {
+        return document.querySelector(`tr[data-day-index="${dayIndex}"] .day-name-cell`);
+      }
+
+      function getDayAddProjectCell(dayIndex) {
+        return document.querySelector(`tr[data-day-index="${dayIndex}"] .day-add-project-cell`);
+      }
+
+      function getDayTotalCell(dayIndex) {
+        return document.querySelector(`tr[data-day-index="${dayIndex}"] .day-total-cell`);
+      }
+
+      function updateDayRowspans(dayIndex) {
+        const rows = getDayRows(dayIndex);
+        const dateCell = getDateCell(dayIndex);
+        const dayCell = getDayNameCell(dayIndex);
+        const addProjectCell = getDayAddProjectCell(dayIndex);
+        const totalCell = getDayTotalCell(dayIndex);
+        const spanCount = Math.max(rows.length, 1);
+
+        if (dateCell) dateCell.rowSpan = spanCount;
+        if (dayCell) dayCell.rowSpan = spanCount;
+        if (addProjectCell) addProjectCell.rowSpan = spanCount;
+        if (totalCell) totalCell.rowSpan = spanCount;
+
+        const addBtn = addProjectCell?.querySelector(".btn-add-project");
+        if (addBtn) addBtn.disabled = rows.length >= MAX_ENTRIES_PER_DAY;
+      }
+
+      function updateDayTotals() {
+        const totalCells = Array.from(document.querySelectorAll(".day-total-cell"));
+
+        for (const cell of totalCells) {
+          const dayIndex = cell.getAttribute("data-day-total-for");
+          const rows = getDayRows(dayIndex);
+          let sum = 0;
+
+          for (const row of rows) {
+            const hoursInput = row.querySelector(".hours");
+            const h = Number(hoursInput?.value || 0);
+            if (Number.isFinite(h)) sum += h;
+          }
+
+          const span = cell.querySelector(".day-total-value");
+          if (span) span.textContent = sum.toFixed(2);
+        }
+      }
+
+      function autoFillWeekends() {
+        const rows = Array.from(document.querySelectorAll('tr[data-day-index]'));
+
+        for (const tr of rows) {
+          const dayName = tr.getAttribute("data-day-name") || "";
           if (!isWeekendDayName(dayName)) continue;
 
           const projectSel = tr.querySelector(".project-select");
@@ -292,66 +464,168 @@
           const adoInp = tr.querySelector(".ado-tickets");
           const hoursInp = tr.querySelector(".hours");
 
-          // Only autofill if user hasn’t already entered something
-          if (projectSel && !projectSel.value) projectSel.value = "Non-Working";
-          if (summaryInp && !summaryInp.value) summaryInp.value = "Weekend";
-          if (hoursInp && (hoursInp.value === "" || hoursInp.value == null)) hoursInp.value = "0";
+          const currentProject = String(projectSel?.value || "").trim();
+          const normalizedProject = currentProject.toLowerCase();
 
-          // fill ADO for weekends so submit rule "all fields required" passes
-          if (adoInp && !adoInp.value) adoInp.value = "N/A";
+          if (!currentProject) {
+            if (projectSel) projectSel.value = "Non-Working";
+            if (summaryInp && !String(summaryInp.value || "").trim()) summaryInp.value = "Weekend";
+            if (adoInp && !String(adoInp.value || "").trim()) adoInp.value = "N/A";
+            if (hoursInp && String(hoursInp.value || "").trim() === "") hoursInp.value = "0";
+            continue;
+          }
+
+          if (normalizedProject === "non-working" || normalizedProject === "non working") {
+            if (summaryInp && !String(summaryInp.value || "").trim()) summaryInp.value = "Weekend";
+            if (adoInp && !String(adoInp.value || "").trim()) adoInp.value = "N/A";
+            if (hoursInp && String(hoursInp.value || "").trim() === "") hoursInp.value = "0";
+          }
         }
       }
 
-      document.addEventListener("DOMContentLoaded", autoFillWeekends);
+      function addProjectRow(dayIndex) {
+        const rows = getDayRows(dayIndex);
+        if (rows.length >= MAX_ENTRIES_PER_DAY) {
+          showValidationErrors([`Maximum ${MAX_ENTRIES_PER_DAY} entries allowed for this day.`]);
+          return;
+        }
 
-      function collectRowsFromUI() {
-        const trs = document.querySelectorAll("tbody tr");
-        const ids = <%- JSON.stringify(days.map(x => x.TimesheetDayId)) %>;
-        const rows = [];
+        const lastRow = rows[rows.length - 1];
+        const template = document.getElementById("projectRowTemplate");
+        if (!template || !lastRow) return;
 
-        for (let i = 0; i < trs.length; i++) {
-          const tr = trs[i];
-          rows.push({
-            timesheetDayId: ids[i],
-            dayName: tr.children[1]?.textContent?.trim() || "", // for weekend rule
+        const frag = template.content.cloneNode(true);
+        const newRow = frag.querySelector("tr");
+
+        newRow.setAttribute("data-day-index", lastRow.getAttribute("data-day-index") || "");
+        newRow.setAttribute("data-day-name", lastRow.getAttribute("data-day-name") || "");
+        newRow.setAttribute("data-timesheet-day-id", lastRow.getAttribute("data-timesheet-day-id") || "");
+
+        lastRow.parentNode.insertBefore(newRow, lastRow.nextSibling);
+
+        updateDayRowspans(dayIndex);
+        updateDayTotals();
+      }
+
+      function removeProjectRow(btn) {
+        const tr = btn.closest("tr");
+        if (!tr) return;
+
+        const dayIndex = tr.getAttribute("data-day-index");
+        const rows = getDayRows(dayIndex);
+
+        if (rows.length <= 1) {
+          showValidationErrors(["At least one row is required for each day."]);
+          return;
+        }
+
+        const firstRow = rows[0];
+        const isFirstRow = firstRow === tr;
+
+        if (isFirstRow && rows.length > 1) {
+          const nextRow = rows[1];
+          const dateCell = tr.querySelector(".day-date-cell");
+          const dayCell = tr.querySelector(".day-name-cell");
+          const addProjectCell = tr.querySelector(".day-add-project-cell");
+          const totalCell = tr.querySelector(".day-total-cell");
+
+          if (dateCell) nextRow.insertBefore(dateCell, nextRow.firstChild);
+          if (dayCell) nextRow.insertBefore(dayCell, nextRow.children[1] || null);
+          if (addProjectCell) nextRow.insertBefore(addProjectCell, nextRow.children[6] || null);
+          if (totalCell) nextRow.insertBefore(totalCell, nextRow.children[7] || null);
+        }
+
+        tr.remove();
+        updateDayRowspans(dayIndex);
+        updateDayTotals();
+      }
+
+      function collectDaysFromUI() {
+        const dayMap = new Map();
+        const trs = Array.from(document.querySelectorAll('tr[data-day-index]'));
+
+        for (const tr of trs) {
+          const dayIndex = tr.getAttribute("data-day-index");
+          const timesheetDayId = Number(tr.getAttribute("data-timesheet-day-id"));
+          const dayName = tr.getAttribute("data-day-name") || "";
+
+          if (!dayMap.has(dayIndex)) {
+            dayMap.set(dayIndex, {
+              timesheetDayId,
+              dayName,
+              entries: []
+            });
+          }
+
+          dayMap.get(dayIndex).entries.push({
             projectName: tr.querySelector(".project-select")?.value || "",
             workSummary: tr.querySelector(".work-summary")?.value || "",
             adoTickets: tr.querySelector(".ado-tickets")?.value || "",
             hours: tr.querySelector(".hours")?.value || ""
           });
         }
-        return rows;
+
+        return Array.from(dayMap.entries())
+          .sort((a, b) => Number(a[0]) - Number(b[0]))
+          .map(x => x[1]);
       }
 
-      function validateRowsClient(rows) {
+      function validateDaysClient(days) {
         const errors = [];
+        let weekTotal = 0;
 
-        function isWeekend(dayName) {
-          const d = String(dayName || "").toLowerCase();
-          return d.startsWith("sat") || d.startsWith("sun");
-        }
+        days.forEach((day, dayIdx) => {
+          const dayLabel = `Day ${dayIdx + 1} (${day.dayName || "Day"})`;
+          const weekend = isWeekendDayName(day.dayName);
+          const entries = Array.isArray(day.entries) ? day.entries : [];
 
-        rows.forEach((r, idx) => {
-          const rowLabel = `Row ${idx + 1} (${r.dayName || "Day"})`;
-
-          const project = String(r.projectName || "").trim();
-          const summary = String(r.workSummary || "").trim();
-          const ado = String(r.adoTickets || "").trim();
-          const hours = Number(r.hours);
-
-          if (!project) errors.push(`${rowLabel}: Project is required.`);
-          if (!summary) errors.push(`${rowLabel}: Work Summary is required.`);
-          if (!ado) errors.push(`${rowLabel}: ADO Ticket is required.`);
-
-          if (!Number.isFinite(hours)) {
-            errors.push(`${rowLabel}: Hours must be a number.`);
-          } else if (isWeekend(r.dayName)) {
-            if (hours < 0) errors.push(`${rowLabel}: Hours cannot be negative.`);
-            // weekend allows 0
-          } else {
-            if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0 (weekdays).`);
+          if (entries.length === 0) {
+            errors.push(`${dayLabel}: At least one entry is required.`);
+            return;
           }
+
+          if (entries.length > MAX_ENTRIES_PER_DAY) {
+            errors.push(`${dayLabel}: Maximum ${MAX_ENTRIES_PER_DAY} entries allowed.`);
+          }
+
+          let dayTotal = 0;
+
+          entries.forEach((e, entryIdx) => {
+            const rowLabel = `${dayLabel} - Entry ${entryIdx + 1}`;
+            const project = String(e.projectName || "").trim();
+            const summary = String(e.workSummary || "").trim();
+            const ado = String(e.adoTickets || "").trim();
+            const hours = Number(e.hours);
+
+            if (!project) errors.push(`${rowLabel}: Project is required.`);
+            if (!summary) errors.push(`${rowLabel}: Work Summary is required.`);
+            if (!ado) errors.push(`${rowLabel}: ADO Ticket is required.`);
+
+            if (!Number.isFinite(hours)) {
+              errors.push(`${rowLabel}: Hours must be a number.`);
+            } else {
+              const isNonWorking = project.toLowerCase() === "non-working" || project.toLowerCase() === "non working";
+
+              if (isNonWorking) {
+                if (hours !== 0) errors.push(`${rowLabel}: Non-Working hours must be 0.`);
+              } else {
+                if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0.`);
+              }
+
+              dayTotal += hours;
+            }
+          });
+
+          if (dayTotal > 15) {
+            errors.push(`${dayLabel}: Total hours cannot exceed 15.`);
+          }
+
+          weekTotal += dayTotal;
         });
+
+        if (weekTotal > 70) {
+          errors.push(`Total weekly hours (${weekTotal}) cannot exceed 70.`);
+        }
 
         return errors;
       }
@@ -363,7 +637,7 @@
           box.innerHTML = "";
         }
 
-        document.querySelectorAll("tbody tr").forEach(tr => {
+        document.querySelectorAll("tr[data-day-index]").forEach(tr => {
           tr.classList.remove("row-error");
           tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
         });
@@ -371,42 +645,36 @@
 
       function showValidationErrors(errors) {
         const box = document.getElementById("validationBox");
+        const msgs = Array.isArray(errors) ? errors : [String(errors)];
 
-        // Fallback if container missing
         if (!box) {
-          alert(Array.isArray(errors) ? errors.join("\n") : String(errors));
+          alert(msgs.join("\n"));
           return;
         }
 
-        // Display panel
-        const list = (Array.isArray(errors) ? errors : [String(errors)])
-          .map(e => `<li>${escapeHtml(e)}</li>`)
-          .join("");
-
         box.innerHTML = `
           <div><b>Please fix the following before submitting:</b></div>
-          <ul>${list}</ul>
+          <ul>${msgs.map(e => `<li>${escapeHtml(e)}</li>`).join("")}</ul>
         `;
         box.style.display = "block";
         box.scrollIntoView({ behavior: "smooth", block: "start" });
 
-        // Highlight rows based on error text like: "Row 3 (Mon): Project is required."
-        const trs = Array.from(document.querySelectorAll("tbody tr"));
+        const trs = Array.from(document.querySelectorAll("tr[data-day-index]"));
 
-        for (const msg of (Array.isArray(errors) ? errors : [String(errors)])) {
-          const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
+        for (const msg of msgs) {
+          const m = msg.match(/^Day\s+(\d+)\s+\(([^)]+)\)\s*-\s*Entry\s+(\d+):\s*(.*)$/i);
           if (!m) continue;
 
-          const rowNum = Number(m[1]);   // 1-based
-          const rowIndex = rowNum - 1;   // 0-based
-          const detail = (m[3] || "").toLowerCase();
+          const dayNum = Number(m[1]);
+          const entryNum = Number(m[3]);
+          const detail = (m[4] || "").toLowerCase();
 
-          const tr = trs[rowIndex];
+          const matchingRows = trs.filter(tr => Number(tr.getAttribute("data-day-index")) === (dayNum - 1));
+          const tr = matchingRows[entryNum - 1];
           if (!tr) continue;
 
           tr.classList.add("row-error");
 
-          // Optional: highlight specific field if we can infer it
           if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
           if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
           if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
@@ -414,121 +682,46 @@
         }
       }
 
-      // Simple HTML escape to avoid rendering issues
-      function escapeHtml(s) {
-        return String(s)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
-      }
-
       document.addEventListener("input", (e) => {
-        if (e.target.closest("tbody")) clearValidationErrorsUI();
+        if (e.target.closest("tr[data-day-index]")) {
+          clearValidationErrorsUI();
+          updateDayTotals();
+        }
       });
 
       document.addEventListener("change", (e) => {
-        if (e.target.closest("tbody")) clearValidationErrorsUI();
+        if (e.target.closest("tr[data-day-index]")) {
+          clearValidationErrorsUI();
+          updateDayTotals();
+        }
       });
 
       async function submitTimesheet() {
-        // ---- UI helpers ----
-        function getValidationBox() {
-          return document.getElementById("validationBox");
-        }
-
-        function clearValidationUI() {
-          const box = getValidationBox();
-          if (box) {
-            box.style.display = "none";
-            box.innerHTML = "";
-          }
-
-          document.querySelectorAll("tbody tr").forEach(tr => {
-            tr.classList.remove("row-error");
-            tr.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
-          });
-        }
-
-        function showValidationErrorsUI(errors) {
-          const msgs = Array.isArray(errors) ? errors : [String(errors)];
-          const box = getValidationBox();
-
-          // Render panel
-          if (box) {
-            box.innerHTML = `
-              <div><b>Please fix the following before submitting:</b></div>
-              <ul>${msgs.map(m => `<li>${escapeHtml(m)}</li>`).join("")}</ul>
-            `;
-            box.style.display = "block";
-            box.scrollIntoView({ behavior: "smooth", block: "start" });
-          } else {
-            console.warn("validationBox not found; falling back to console.");
-            console.warn(msgs);
-          }
-
-          // Highlight rows/fields based on your error format:
-          // "Row 3 (Mon): Project is required."
-          const trs = Array.from(document.querySelectorAll("tbody tr"));
-
-          for (const msg of msgs) {
-            const m = msg.match(/^Row\s+(\d+)\s+\(([^)]+)\):\s*(.*)$/i);
-            if (!m) continue;
-
-            const rowNum = Number(m[1]);        // 1-based
-            const idx = rowNum - 1;             // 0-based
-            const detail = (m[3] || "").toLowerCase();
-
-            const tr = trs[idx];
-            if (!tr) continue;
-
-            tr.classList.add("row-error");
-
-            if (detail.includes("project")) tr.querySelector(".project-select")?.classList.add("field-error");
-            if (detail.includes("work summary")) tr.querySelector(".work-summary")?.classList.add("field-error");
-            if (detail.includes("ado")) tr.querySelector(".ado-tickets")?.classList.add("field-error");
-            if (detail.includes("hours")) tr.querySelector(".hours")?.classList.add("field-error");
-          }
-        }
-
-        // ---- start submit ----
-        clearValidationUI();
+        clearValidationErrorsUI();
 
         const submitBtn = document.getElementById("btnSubmit");
         if (submitBtn) submitBtn.disabled = true;
 
         try {
-          // Ensure weekends are auto-filled before validate & submit
           autoFillWeekends();
+          const days = collectDaysFromUI();
+          const errors = validateDaysClient(days);
 
-          const rows = collectRowsFromUI();
-
-          // Ensure dayName exists for server weekend rule + your validator
-          const trs = document.querySelectorAll("tbody tr");
-          for (let i = 0; i < trs.length; i++) {
-            rows[i].dayName = trs[i].children[1]?.textContent?.trim() || "";
-          }
-
-          const errors = validateRowsClient(rows);
           if (errors.length) {
-            showValidationErrorsUI(errors);
+            showValidationErrors(errors);
             return;
           }
 
-          const url = `/timesheets/<%= timesheetId %>/submit`;
-
-          // Timeout protection (15s)
           const controller = new AbortController();
           const t = setTimeout(() => controller.abort(), 15000);
 
-          const resp = await fetch(url, {
+          const resp = await fetch(`/timesheets/${TIMESHEET_ID}/submit`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               "Accept": "application/json"
             },
-            body: JSON.stringify({ weekEnding: "<%= weekEnding %>", rows }),
+            body: JSON.stringify({ weekEnding: WEEK_ENDING, days }),
             signal: controller.signal
           });
 
@@ -540,83 +733,91 @@
           if (!resp.ok) {
             let msg = "Submit failed.";
             if (ct.includes("application/json")) {
-              try { msg = (JSON.parse(raw)?.message) || msg; } catch {}
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed?.errors) && parsed.errors.length) {
+                  showValidationErrors(parsed.errors);
+                  return;
+                }
+                msg = parsed?.message || msg;
+              } catch {}
             } else {
               msg = raw || msg;
             }
-            showValidationErrorsUI([msg]);
+            showValidationErrors([msg]);
             return;
           }
 
-          // Success
           window.location.href = "/timesheets";
-
         } catch (err) {
           const msg =
             err?.name === "AbortError"
               ? "Submit timed out. Please try again (server may be busy)."
               : (err?.message || String(err));
 
-          showValidationErrorsUI([msg]);
+          showValidationErrors([msg]);
           console.error("submitTimesheet error:", err);
         } finally {
           if (submitBtn) submitBtn.disabled = false;
         }
       }
 
-      function save() {
-        const trs = document.querySelectorAll("tbody tr");
-        const ids = <%- JSON.stringify(days.map(x => x.TimesheetDayId)) %>;
-        const rows = [];
+      async function save() {
+        try {
+          autoFillWeekends();
+          const days = collectDaysFromUI();
 
-        for (let i = 0; i < trs.length; i++) {
-          const tr = trs[i];
-
-          const project = tr.querySelector(".project-select")?.value || "";
-          const workSummary = tr.querySelector(".work-summary")?.value || "";
-          const adoTickets = tr.querySelector(".ado-tickets")?.value || "";
-          const hours = tr.querySelector(".hours")?.value || "";
-
-          rows.push({
-            timesheetDayId: ids[i],
-            projectName: project,
-            workSummary: workSummary,
-            adoTickets: adoTickets,
-            hours: hours
+          const resp = await fetch(`/timesheets/${TIMESHEET_ID}/save`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
+            body: JSON.stringify({ weekEnding: WEEK_ENDING, days })
           });
-        }
 
-        fetch(`/timesheets/<%= timesheetId %>/save`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ weekEnding: "<%= weekEnding %>", rows })
-        }).then(async (r) => {
-          if (!r.ok) {
-            const j = await r.json().catch(() => null);
-            alert(j?.message || "Save failed");
+          const ct = resp.headers.get("content-type") || "";
+          const raw = await resp.text();
+
+          if (!resp.ok) {
+            let msg = "Save failed.";
+            if (ct.includes("application/json")) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed?.errors) && parsed.errors.length) {
+                  showValidationErrors(parsed.errors);
+                  return;
+                }
+                msg = parsed?.message || msg;
+              } catch {}
+            } else {
+              msg = raw || msg;
+            }
+            showValidationErrors([msg]);
             return;
           }
 
-          // ✅ After a successful save draft, hide the submit validation error
           clearValidationAlert();
-
-          // ✅ show success confirmation
+          clearValidationErrorsUI();
           showSaveSuccess("Saved successfully.");
-        });
+        } catch (err) {
+          showValidationErrors([err?.message || "Save failed due to network/server error."]);
+        }
       }
-    </script>
 
+      document.addEventListener("DOMContentLoaded", () => {
+        autoFillWeekends();
+        const uniqueDayIndexes = [...new Set(Array.from(document.querySelectorAll("tr[data-day-index]")).map(tr => tr.getAttribute("data-day-index")))];
+        uniqueDayIndexes.forEach(updateDayRowspans);
+        updateDayTotals();
+      });
+    </script>
   <% } else { %>
-    <!-- ===================== -->
-    <!-- Approver Review / Edit -->
-    <!-- ===================== -->
     <div class="filter-container" style="margin-top:16px;">
-      
       <form method="post" action="/approvals/<%= approvalId %>/approve" class="inline-form">
         <button class="btn-primary" type="submit">Approve</button>
       </form>
 
-      <!-- ✅ Reject uses fetch so validation stays on same page -->
       <form id="rejectForm" class="inline-form" onsubmit="return rejectApproval(event);">
         <input
           id="rejectComment"
@@ -670,7 +871,6 @@
         const commentEl = document.getElementById("rejectComment");
         const comment = String(commentEl?.value || "").trim();
 
-        // Client-side required validation (instant)
         if (!comment) {
           showApprovalError("Rejection comment required.");
           commentEl?.focus();
@@ -707,7 +907,6 @@
 
           window.location.href = "/approvals";
           return false;
-
         } catch (err) {
           showApprovalError(err?.message || "Reject failed due to network/server error.");
           return false;

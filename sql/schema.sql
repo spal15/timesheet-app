@@ -334,3 +334,11 @@ ORDER BY p.ProjectName, tm.TeamName, st.SubTeamName, psta.ApprovalOrder;
 ALTER TABLE dbo.TimesheetProjectApprovals
 ADD VendorReply NVARCHAR(2000) NULL,
     VendorReplyAt DATETIME2(0) NULL;
+
+
+
+ delete from TimesheetAudit
+ delete from TimesheetProjectApprovals
+ delete from TimesheetDayEntries
+ delete from TimesheetDays
+ delete from Timesheets

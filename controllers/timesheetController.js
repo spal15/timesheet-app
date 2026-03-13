@@ -6,6 +6,7 @@ const approvalService = require("../services/approvalService");
 /** ✅ Hour caps */
 const MAX_HOURS_PER_DAY = 15;
 const MAX_HOURS_PER_WEEK = 70;
+const MAX_ENTRIES_PER_DAY = 5;
 
 /** ✅ Projects that should NEVER create approvals */
 const NON_APPROVABLE_PROJECTS = new Set([
@@ -13,28 +14,36 @@ const NON_APPROVABLE_PROJECTS = new Set([
   "non working"
 ]);
 
+const WEEKEND_DAY_NAMES = new Set(["Saturday", "Sunday"]);
+
 function isValidISODate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 }
 
 function isWeekEndingAllowed(yyyyMmDd) {
-  // Toggle this depending on your definition of week-ending:
-  // Friday = 5, Saturday = 6
-  const REQUIRE_FRIDAY = true; // <-- set true if week ending must be Friday
-  const REQUIRE_SATURDAY = false; // <-- set true if week ending must be Saturday
+  const REQUIRE_FRIDAY = true;
+  const REQUIRE_SATURDAY = false;
 
   const d = new Date(yyyyMmDd + "T00:00:00");
   if (Number.isNaN(d.getTime())) return false;
 
-  const dow = d.getDay(); // local day
+  const dow = d.getDay();
   if (REQUIRE_FRIDAY) return dow === 5;
   if (REQUIRE_SATURDAY) return dow === 6;
 
-  return true; // if no strict weekday requirement
+  return true;
 }
 
 function normalizeProjectName(name) {
   return String(name || "").trim();
+}
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function normalizeAdo(value) {
+  return String(value || "").trim();
 }
 
 function isNonApprovableProject(name) {
@@ -42,41 +51,168 @@ function isNonApprovableProject(name) {
   return NON_APPROVABLE_PROJECTS.has(n);
 }
 
+function isWeekendDayName(dayName) {
+  return WEEKEND_DAY_NAMES.has(String(dayName || "").trim());
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function hasMeaningfulWeekendInput(entry) {
+  const project = normalizeProjectName(entry?.projectName);
+  const summary = normalizeText(entry?.workSummary);
+  const ado = normalizeAdo(entry?.adoTickets);
+  const rawHours = entry?.hours;
+  const isNonWorking = isNonApprovableProject(project);
+
+  if (!isNonWorking && project) return true;
+
+  if (rawHours !== "" && rawHours != null) {
+    const hours = toNumber(rawHours);
+    if (Number.isFinite(hours) && hours > 0) return true;
+  }
+
+  if (!isNonWorking && summary && summary.toLowerCase() !== "weekend") return true;
+  if (!isNonWorking && ado && ado.toLowerCase() !== "n/a") return true;
+
+  return false;
+}
+
 /**
- * ✅ Shared hour cap validator for BOTH Save Draft and Submit
- * - Enforces: hours <= 15/day and total week <= 70
- * - Draft: allows blanks, but if hours provided => must be numeric, >=0, within caps
+ * Payload shape expected:
+ * days: [
+ *   {
+ *     timesheetDayId,
+ *     dayName,
+ *     entries: [
+ *       { entryId?, projectName, workSummary, adoTickets, hours }
+ *     ]
+ *   }
+ * ]
  */
-function validateHourCaps(rows, dayById) {
+function normalizeIncomingDays(rawDays, dbDays = []) {
+  if (!Array.isArray(rawDays)) return [];
+
+  const dayById = new Map(
+    (dbDays || []).map(d => [Number(d.TimesheetDayId), d])
+  );
+
+  return rawDays.map((d) => {
+    const timesheetDayId = Number(d.timesheetDayId);
+    const dbDay = dayById.get(timesheetDayId);
+
+    const dayName = String(d.dayName || dbDay?.DayName || "").trim();
+    const entries = Array.isArray(d.entries) ? d.entries : [];
+
+    return {
+      timesheetDayId,
+      dayName,
+      entries: entries.map((e, idx) => ({
+        entryId: e?.entryId ? Number(e.entryId) : null,
+        entryOrder: Number(e?.entryOrder || idx + 1),
+        projectName: normalizeProjectName(e?.projectName),
+        workSummary: normalizeText(e?.workSummary),
+        adoTickets: normalizeAdo(e?.adoTickets),
+        hours: e?.hours === "" || e?.hours == null ? "" : e.hours
+      }))
+    };
+  });
+}
+
+/**
+ * ✅ Shared validation for BOTH Save Draft and Submit
+ * - any day can use Non-Working with 0 hours
+ * - any other project requires hours > 0
+ */
+function validateDayPayload(days, dayById, { submitMode = false } = {}) {
   const errors = [];
   let weekTotal = 0;
 
-  rows.forEach((r, idx) => {
-    const id = Number(r.timesheetDayId);
-    const dayInfo = dayById?.get?.(id);
-    const dayName = String(r.dayName || dayInfo?.DayName || "");
-    const rowLabel = `Row ${idx + 1}${dayName ? ` (${dayName})` : ""}`;
+  if (!Array.isArray(days) || days.length !== 7) {
+    errors.push("Exactly 7 days are required.");
+    return errors;
+  }
 
-    const raw = r.hours;
-    if (raw === "" || raw == null) return; // Draft can keep blank; Submit will already send numbers
+  for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+    const d = days[dayIndex];
+    const id = Number(d.timesheetDayId);
+    const dbDay = dayById.get(id);
 
-    const hours = Number(raw);
-    if (!Number.isFinite(hours)) {
-      errors.push(`${rowLabel}: Hours must be a number.`);
-      return;
+    if (!Number.isInteger(id) || !dbDay) {
+      errors.push(`Day ${dayIndex + 1}: Invalid timesheetDayId.`);
+      continue;
     }
 
-    if (hours < 0) {
-      errors.push(`${rowLabel}: Hours cannot be negative.`);
-      return;
+    const dayName = String(d.dayName || dbDay.DayName || "").trim();
+    const rowLabel = `${dayName || `Day ${dayIndex + 1}`}`;
+
+    const entries = Array.isArray(d.entries) ? d.entries : [];
+
+    if (entries.length === 0) {
+      errors.push(`${rowLabel}: At least one entry is required.`);
+      continue;
     }
 
-    if (hours > MAX_HOURS_PER_DAY) {
-      errors.push(`${rowLabel}: Hours cannot exceed ${MAX_HOURS_PER_DAY} in a day.`);
+    if (entries.length > MAX_ENTRIES_PER_DAY) {
+      errors.push(`${rowLabel}: Maximum ${MAX_ENTRIES_PER_DAY} entries allowed.`);
     }
 
-    weekTotal += hours;
-  });
+    let dayTotal = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const entryLabel = `${rowLabel} - Entry ${i + 1}`;
+
+      const projectName = normalizeProjectName(e.projectName);
+      const workSummary = normalizeText(e.workSummary);
+      const adoTickets = normalizeAdo(e.adoTickets);
+      const rawHours = e.hours;
+      const isNonWorking = isNonApprovableProject(projectName);
+
+      if (rawHours !== "" && rawHours != null) {
+        const hours = toNumber(rawHours);
+        if (!Number.isFinite(hours)) {
+          errors.push(`${entryLabel}: Hours must be a number.`);
+        } else if (hours < 0) {
+          errors.push(`${entryLabel}: Hours cannot be negative.`);
+        } else {
+          dayTotal += hours;
+        }
+      }
+
+      if (submitMode) {
+        const hours = rawHours === "" || rawHours == null ? NaN : toNumber(rawHours);
+
+        if (!projectName) {
+          errors.push(`${entryLabel}: Project is required.`);
+        }
+
+        if (!workSummary) {
+          errors.push(`${entryLabel}: Work Summary is required.`);
+        }
+
+        if (!adoTickets) {
+          errors.push(`${entryLabel}: ADO Ticket is required.`);
+        }
+
+        if (!Number.isFinite(hours)) {
+          errors.push(`${entryLabel}: Hours must be a number.`);
+        } else if (hours < 0) {
+          errors.push(`${entryLabel}: Hours cannot be negative.`);
+        } else if (!isNonWorking && hours <= 0) {
+          errors.push(`${entryLabel}: Hours must be greater than 0.`);
+        }
+      }
+    }
+
+    if (dayTotal > MAX_HOURS_PER_DAY) {
+      errors.push(`${rowLabel}: Total hours cannot exceed ${MAX_HOURS_PER_DAY}.`);
+    }
+
+    weekTotal += dayTotal;
+  }
 
   if (weekTotal > MAX_HOURS_PER_WEEK) {
     errors.push(`Total weekly hours (${weekTotal}) cannot exceed ${MAX_HOURS_PER_WEEK}.`);
@@ -85,9 +221,75 @@ function validateHourCaps(rows, dayById) {
   return errors;
 }
 
+function applyWeekendDefaults(days) {
+  return days.map((d) => {
+    const weekend = isWeekendDayName(d.dayName);
+    if (!weekend) return d;
+
+    const entries = (Array.isArray(d.entries) ? d.entries : []).map((e, idx) => {
+      const hasWork = hasMeaningfulWeekendInput(e);
+
+      if (hasWork) {
+        return {
+          ...e,
+          entryId: e?.entryId || null,
+          entryOrder: e?.entryOrder || idx + 1,
+          projectName: normalizeProjectName(e.projectName),
+          workSummary: normalizeText(e.workSummary),
+          adoTickets: normalizeAdo(e.adoTickets),
+          hours: e?.hours === "" || e?.hours == null ? "" : e.hours
+        };
+      }
+
+      return {
+        entryId: e?.entryId || null,
+        entryOrder: e?.entryOrder || idx + 1,
+        projectName: normalizeProjectName(e.projectName) || "Non-Working",
+        workSummary: normalizeText(e.workSummary) || "Weekend",
+        adoTickets: normalizeAdo(e.adoTickets) || "N/A",
+        hours: e?.hours === "" || e?.hours == null ? 0 : e.hours
+      };
+    });
+
+    return {
+      ...d,
+      entries: entries.length ? entries : [{
+        entryId: null,
+        entryOrder: 1,
+        projectName: "Non-Working",
+        workSummary: "Weekend",
+        adoTickets: "N/A",
+        hours: 0
+      }]
+    };
+  });
+}
+
+function collectUsedProjectNames(days) {
+  const hoursByProject = new Map();
+
+  for (const d of days) {
+    for (const e of d.entries || []) {
+      const projectName = normalizeProjectName(e.projectName);
+      const hours = toNumber(e.hours);
+
+      if (!projectName) continue;
+      if (isNonApprovableProject(projectName)) continue;
+      if (!Number.isFinite(hours)) continue;
+      if (hours <= 0) continue;
+
+      hoursByProject.set(projectName, (hoursByProject.get(projectName) || 0) + hours);
+    }
+  }
+
+  return [...hoursByProject.entries()]
+    .filter(([_, totalHours]) => Number(totalHours) > 0)
+    .map(([projectName]) => projectName);
+}
+
 async function listMyTimesheets(req, res) {
   const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
-  const weekEnding = String(req.query.weekEnding || "").trim(); // optional prefill
+  const weekEnding = String(req.query.weekEnding || "").trim();
 
   return res.render("timesheets", { rows, weekEnding, error: null, errors: [] });
 }
@@ -97,7 +299,6 @@ async function editTimesheet(req, res) {
 
   if (!weekEnding) return res.redirect("/timesheets");
 
-  // ✅ Server-side validation for date picker input
   if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
     const rows = await timesheetService.listTimesheetsForVendor(req.user.UserId);
 
@@ -117,11 +318,10 @@ async function editTimesheet(req, res) {
   const header = await timesheetService.getTimesheetHeader(timesheetId);
 
   await timesheetService.ensure7Days(timesheetId, weekEnding);
-  const days = await timesheetService.listTimesheetDays(timesheetId);
 
+  const days = await timesheetService.listTimesheetDaysWithEntries(timesheetId);
   const projects = await projectService.listActiveProjects();
 
-  // ✅ NEW: load rejection comments (project-level) if rejected
   let rejectedProjects = [];
   if (String(header.Status) === "Rejected") {
     rejectedProjects = await approvalService.listRejectedProjectApprovals(timesheetId);
@@ -133,7 +333,8 @@ async function editTimesheet(req, res) {
     status: header.Status,
     days,
     projects,
-    rejectedProjects, // ✅ pass to EJS
+    rejectedProjects,
+    maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
     error: null
   });
 }
@@ -144,34 +345,38 @@ async function saveTimesheet(req, res) {
     return res.status(400).json({ ok: false, message: "Invalid timesheet id" });
   }
 
-  const rows = req.body?.rows || [];
-  if (!Array.isArray(rows)) return res.status(400).json({ ok: false, message: "rows must be an array" });
+  const incomingDays = req.body?.days || [];
+  if (!Array.isArray(incomingDays)) {
+    return res.status(400).json({ ok: false, message: "days must be an array" });
+  }
 
   try {
-    // ✅ Ensure day ids are valid + build dayById for labels
-    const days = await timesheetService.listTimesheetDays(timesheetId);
+    const dbDays = await timesheetService.listTimesheetDays(timesheetId);
     const dayById = new Map(
-      (days || []).map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
+      (dbDays || []).map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
     );
 
-    const badId = rows.find(r => !Number.isFinite(Number(r.timesheetDayId)) || !dayById.has(Number(r.timesheetDayId)));
+    const days = normalizeIncomingDays(incomingDays, dbDays);
+
+    const badId = days.find(d => !Number.isFinite(Number(d.timesheetDayId)) || !dayById.has(Number(d.timesheetDayId)));
     if (badId) {
       return res.status(400).json({
         ok: false,
-        message:
-          "Save payload is missing a valid timesheetDayId for one or more rows. Please refresh the page and try again."
+        message: "Save payload is missing a valid timesheetDayId for one or more days. Please refresh the page and try again."
       });
     }
 
-    // ✅ Apply hour caps in Save Draft
-    const capErrors = validateHourCaps(rows, dayById);
+    const capErrors = validateDayPayload(days, dayById, { submitMode: false });
     if (capErrors.length) {
       const msg = "Please fix hours before saving:\n" + capErrors.map(e => `• ${e}`).join("\n");
       return res.status(400).json({ ok: false, message: msg, errors: capErrors });
     }
 
-    await timesheetService.updateTimesheetDaysEditable(timesheetId, rows);
+    const normalizedForSave = applyWeekendDefaults(days);
+
+    await timesheetService.updateTimesheetDayEntriesEditable(timesheetId, normalizedForSave);
     await timesheetService.addAudit(timesheetId, req.user.UserId, "Saved");
+
     return res.json({ ok: true });
   } catch (err) {
     return res.status(400).json({ ok: false, message: err?.message || "Save failed" });
@@ -181,7 +386,7 @@ async function saveTimesheet(req, res) {
 async function submitTimesheet(req, res) {
   const timesheetId = Number(req.params.id);
   const weekEnding = String(req.body?.weekEnding || "").trim();
-  const rows = req.body?.rows || [];
+  const incomingDays = req.body?.days || [];
 
   const wantsJson =
     req.xhr ||
@@ -194,7 +399,6 @@ async function submitTimesheet(req, res) {
       : res.status(status).send(message);
   };
 
-  // ✅ SubTeam required for new approval routing
   const subTeamId = Number(req.user?.SubTeamId || 0);
   if (!subTeamId) {
     return fail(400, "Your SubTeam is not configured in dbo.Users. Ask admin to update your profile.");
@@ -203,13 +407,12 @@ async function submitTimesheet(req, res) {
   if (!Number.isInteger(timesheetId) || timesheetId <= 0) return fail(400, "Invalid timesheet id");
   if (!weekEnding) return fail(400, "weekEnding is required");
 
-  // ✅ Server-side validation for date picker input
   if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
     return fail(400, "Invalid weekEnding date. Please select a valid week ending date.");
   }
 
-  if (!Array.isArray(rows) || rows.length !== 7) {
-    return fail(400, "Submit must include 7 rows (one per day).");
+  if (!Array.isArray(incomingDays) || incomingDays.length !== 7) {
+    return fail(400, "Submit must include 7 day objects.");
   }
 
   const header = await timesheetService.getTimesheetHeader(timesheetId);
@@ -218,95 +421,40 @@ async function submitTimesheet(req, res) {
 
   await timesheetService.ensure7Days(timesheetId, weekEnding);
 
-  // Load DB days to ensure timesheetDayIds are valid and to infer dayName/weekend
-  const days = await timesheetService.listTimesheetDays(timesheetId);
-
-  // Needed for non-JSON re-render + project name validation
+  const dbDays = await timesheetService.listTimesheetDays(timesheetId);
   const projects = await projectService.listActiveProjects();
 
-  // Build lookup for TimesheetDayId -> { DayName, WorkDate }
   const dayById = new Map(
-    days.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
+    dbDays.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
   );
 
-  const badId = rows.find(r => !Number.isFinite(Number(r.timesheetDayId)) || !dayById.has(Number(r.timesheetDayId)));
+  const days = normalizeIncomingDays(incomingDays, dbDays);
+
+  const badId = days.find(d => !Number.isFinite(Number(d.timesheetDayId)) || !dayById.has(Number(d.timesheetDayId)));
   if (badId) {
     const msg =
-      "Submit payload is missing a valid timesheetDayId for one or more rows. Please refresh the page and try again.";
+      "Submit payload is missing a valid timesheetDayId for one or more days. Please refresh the page and try again.";
+
     if (wantsJson) return res.status(400).json({ ok: false, message: msg });
+
     return res.render("timesheet_edit", {
       timesheetId,
       weekEnding,
       status: header.Status,
-      days,
+      days: await timesheetService.listTimesheetDaysWithEntries(timesheetId),
       projects,
+      rejectedProjects: [],
+      maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
       error: msg
     });
   }
 
-  function isWeekendFromDayName(dayName) {
-    const dn = String(dayName || "").toLowerCase();
-    return dn.startsWith("sat") || dn.startsWith("sun");
-  }
-
-  function isWeekendFromDate(workDate) {
-    const wd = workDate instanceof Date ? workDate : new Date(workDate);
-    const dow = wd.getUTCDay();
-    return dow === 0 || dow === 6;
-  }
-
-  function autofillWeekendDefaults(r) {
-    r.projectName = normalizeProjectName(r.projectName) || "Non-Working";
-    r.workSummary = String(r.workSummary || "").trim() || "Weekend";
-    r.adoTickets = String(r.adoTickets || "").trim() || "N/A";
-
-    // ✅ Lock Non-Working weekends to 0 so it never becomes approvable work
-    if (isNonApprovableProject(r.projectName)) {
-      r.hours = "0";
-      return;
-    }
-
-    if (r.hours === "" || r.hours == null) r.hours = "0";
-  }
-
-  const errors = [];
-
-  rows.forEach((r, idx) => {
-    const id = Number(r.timesheetDayId);
-    const dayInfo = dayById.get(id);
-
-    const dayName = String(r.dayName || dayInfo?.DayName || "");
-    const weekend = isWeekendFromDayName(dayName) || isWeekendFromDate(dayInfo?.WorkDate);
-
-    if (weekend) autofillWeekendDefaults(r);
-
-    const rowLabel = `Row ${idx + 1}${dayName ? ` (${dayName})` : ""}`;
-
-    const project = normalizeProjectName(r.projectName);
-    const summary = String(r.workSummary || "").trim();
-    const ado = String(r.adoTickets || "").trim();
-    const hours = Number(r.hours);
-
-    if (!project) errors.push(`${rowLabel}: Project is required.`);
-    if (!summary) errors.push(`${rowLabel}: Work Summary is required.`);
-    if (!ado) errors.push(`${rowLabel}: ADO Ticket is required.`);
-
-    if (!Number.isFinite(hours)) {
-      errors.push(`${rowLabel}: Hours must be a number.`);
-    } else if (weekend) {
-      if (hours < 0) errors.push(`${rowLabel}: Hours cannot be negative.`);
-      // If Non-Working, hours should be 0 (autofill already enforces) - no extra validation needed
-    } else {
-      if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0 (weekdays).`);
-    }
-  });
-
-  // ✅ Apply hour caps in Submit (15/day, 70/week)
-  errors.push(...validateHourCaps(rows, dayById));
+  const normalizedForSubmit = applyWeekendDefaults(days);
+  const errors = validateDayPayload(normalizedForSubmit, dayById, { submitMode: true });
 
   if (errors.length) {
     const msg =
-      "Please complete all fields for every day before submitting:\n" +
+      "Please complete all fields correctly before submitting:\n" +
       errors.map(e => `• ${e}`).join("\n");
 
     if (wantsJson) return res.status(400).json({ ok: false, message: msg, errors });
@@ -315,50 +463,35 @@ async function submitTimesheet(req, res) {
       timesheetId,
       weekEnding,
       status: header.Status,
-      days,
+      days: normalizedForSubmit,
       projects,
+      rejectedProjects: [],
+      maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
       error: msg
     });
   }
 
-  // Save days first (so DB is consistent with what was submitted)
-  await timesheetService.updateTimesheetDaysEditable(timesheetId, rows);
+  await timesheetService.updateTimesheetDayEntriesEditable(timesheetId, normalizedForSubmit);
 
-  // ✅ approvals only for projects with >0 TOTAL hours across the week
-  // ✅ EXCLUDE Non-Working from approval routing (weekend default)
-  const hoursByProject = new Map();
-  for (const r of rows) {
-    const projectName = normalizeProjectName(r.projectName);
-    const hours = Number(r.hours);
-
-    if (!projectName) continue;
-    if (isNonApprovableProject(projectName)) continue; // ✅ key fix
-    if (!Number.isFinite(hours)) continue;
-
-    hoursByProject.set(projectName, (hoursByProject.get(projectName) || 0) + hours);
-  }
-
-  const usedProjectNames = [...hoursByProject.entries()]
-    .filter(([_, totalHours]) => Number(totalHours) > 0)
-    .map(([projectName]) => projectName);
-
-  // Build a case-insensitive ProjectName -> Project row map (from active projects list)
+  const usedProjectNames = collectUsedProjectNames(normalizedForSubmit);
   const projectByName = new Map(
     (projects || []).map(p => [String(p.ProjectName || "").trim().toLowerCase(), p])
   );
 
-  // ✅ Validate mapping for each used project based on submitter subteam
   for (const projectName of usedProjectNames) {
     const p = projectByName.get(String(projectName).trim().toLowerCase());
     if (!p?.ProjectId) {
       const msg = `Project "${projectName}" is not a valid active project.`;
       if (wantsJson) return res.status(400).json({ ok: false, message: msg });
+
       return res.render("timesheet_edit", {
         timesheetId,
         weekEnding,
         status: header.Status,
-        days,
+        days: normalizedForSubmit,
         projects,
+        rejectedProjects: [],
+        maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
         error: msg
       });
     }
@@ -368,26 +501,26 @@ async function submitTimesheet(req, res) {
       const msg =
         `Project "${projectName}" is not mapped to approvers for your SubTeam. ` +
         `Ask admin to configure ProjectSubTeamApprovers.`;
+
       if (wantsJson) return res.status(400).json({ ok: false, message: msg });
 
       return res.render("timesheet_edit", {
         timesheetId,
         weekEnding,
         status: header.Status,
-        days,
+        days: normalizedForSubmit,
         projects,
+        rejectedProjects: [],
+        maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
         error: msg
       });
     }
   }
 
- // ✅ If resubmitting a rejected timesheet, DO NOT clear approvals (it wipes comments/replies).
- // Just ensure required approvals exist (upsert-style).
   if (String(header.Status) !== "Rejected") {
     await approvalService.clearApprovalTasks(timesheetId);
   }
 
-  // ✅ Ensure approvals exist for each project + each approver
   for (const projectName of usedProjectNames) {
     const p = projectByName.get(String(projectName).trim().toLowerCase());
     if (!p?.ProjectId) continue;
@@ -395,12 +528,10 @@ async function submitTimesheet(req, res) {
     const approvers = await projectService.getApproversForProjectAndSubTeam(Number(p.ProjectId), subTeamId);
 
     for (const a of approvers) {
-      // ✅ Use an UPSERT method instead of blind insert
       await approvalService.ensureApprovalTask(timesheetId, Number(p.ProjectId), Number(a.UserId));
     }
   }
 
-// ✅ For rejected resubmission, set approvals back to Pending but KEEP comment/vendor reply history
   if (String(header.Status) === "Rejected") {
     await approvalService.reopenApprovalsForResubmission(timesheetId);
   }
@@ -430,16 +561,25 @@ async function replyToRejection(req, res) {
     return res.status(400).json({ ok: false, message: "Reply is too long (max 2000 chars)." });
   }
 
-  // Ensure this approval belongs to this vendor + is rejected
   const approval = await approvalService.getRejectedApprovalForVendor(approvalId, req.user.UserId);
   if (!approval || Number(approval.TimesheetId) !== timesheetId) {
     return res.status(404).json({ ok: false, message: "Rejected approval not found for this timesheet." });
   }
 
   await approvalService.setVendorReply(approvalId, req.user.UserId, reply);
-  await timesheetService.addAudit(timesheetId, req.user.UserId, `Vendor replied to rejection (ApprovalId=${approvalId})`);
+  await timesheetService.addAudit(
+    timesheetId,
+    req.user.UserId,
+    `Vendor replied to rejection (ApprovalId=${approvalId})`
+  );
 
   return res.json({ ok: true });
 }
 
-module.exports = { listMyTimesheets, editTimesheet, saveTimesheet, submitTimesheet, replyToRejection };
+module.exports = {
+  listMyTimesheets,
+  editTimesheet,
+  saveTimesheet,
+  submitTimesheet,
+  replyToRejection
+};

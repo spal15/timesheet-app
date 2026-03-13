@@ -24,16 +24,16 @@ async function listRejectedProjectApprovals(timesheetId) {
 
   return r.recordset;
 }
+
 /**
  * Returns everything needed to render the review page for a given TimesheetId:
  * - Timesheet header/vendor/status
  * - Approvals/projects for this approver (or all if Admin)
- * - Days for each project (matched by ProjectName since TimesheetDays has no ProjectId)
+ * - Entries for each approved project from TimesheetDayEntries
  */
 async function getTimesheetForReview(timesheetId, user) {
   const pool = await getPool();
 
-  // 1) Header/vendor/status
   const headerR = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .query(`
@@ -51,7 +51,6 @@ async function getTimesheetForReview(timesheetId, user) {
   const header = headerR.recordset[0];
   if (!header) return null;
 
-  // 2) Approvals for this timesheet (Admin sees all; Approver sees only theirs)
   const approvalsReq = pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .input("ApproverUserId", sql.Int, user.UserId);
@@ -83,7 +82,6 @@ async function getTimesheetForReview(timesheetId, user) {
     return { forbidden: true };
   }
 
-  // 3) Load day rows per approval (NO ProjectId in TimesheetDays)
   const projects = [];
   for (const a of approvals) {
     const days = await listProjectDaysForApproval(timesheetId, a.ProjectName);
@@ -186,7 +184,6 @@ async function getApprovalById(approvalId) {
         p.ProjectName         AS ProjectName,
         t.WeekEndingDate      AS WeekEndingDate,
         t.Status              AS TimesheetStatus,
-
         u.DisplayName         AS VendorName,
         u.Email               AS VendorEmail
       FROM dbo.TimesheetProjectApprovals tpa
@@ -200,10 +197,10 @@ async function getApprovalById(approvalId) {
 }
 
 /**
- * TimesheetDays has NO ProjectId column.
- * Match ONLY by ProjectName (normalized) and show all rows for that project.
- *
- * NOTE: No Hours filter so approver sees all rows.
+ * Multi-entry version:
+ * Reads from dbo.TimesheetDayEntries joined to dbo.TimesheetDays.
+ * Matches by normalized ProjectName because approvals table stores ProjectId,
+ * while day entries may only carry ProjectName.
  */
 async function listProjectDaysForApproval(timesheetId, projectName) {
   const pool = await getPool();
@@ -212,20 +209,24 @@ async function listProjectDaysForApproval(timesheetId, projectName) {
     .input("ProjectName", sql.NVarChar(200), projectName)
     .query(`
       SELECT
-        WorkDate,
-        DayName,
-        ProjectName,
-        WorkSummary,
-        ADOTickets,
-        Hours
-      FROM dbo.TimesheetDays
-      WHERE TimesheetId = @TimesheetId
+        td.WorkDate,
+        td.DayName,
+        e.EntryId,
+        e.EntryOrder,
+        e.ProjectName,
+        e.WorkSummary,
+        e.ADOTickets,
+        e.Hours
+      FROM dbo.TimesheetDays td
+      INNER JOIN dbo.TimesheetDayEntries e
+        ON e.TimesheetDayId = td.TimesheetDayId
+      WHERE td.TimesheetId = @TimesheetId
         AND UPPER(
               REPLACE(
                 REPLACE(
-                  REPLACE(LTRIM(RTRIM(ProjectName)), CHAR(9), ''),   -- tabs
-                CHAR(160), ''),                                     -- nbsp
-              ' ', '')                                              -- spaces
+                  REPLACE(LTRIM(RTRIM(e.ProjectName)), CHAR(9), ''),
+                CHAR(160), ''),
+              ' ', '')
             ) = UPPER(
               REPLACE(
                 REPLACE(
@@ -233,7 +234,7 @@ async function listProjectDaysForApproval(timesheetId, projectName) {
                 CHAR(160), ''),
               ' ', '')
             )
-      ORDER BY WorkDate
+      ORDER BY td.WorkDate, e.EntryOrder
     `);
 
   return r.recordset;
@@ -255,7 +256,6 @@ async function setApprovalStatus(approvalId, status, comment) {
 async function recomputeTimesheetFinalStatus(timesheetId) {
   const pool = await getPool();
 
-  // Get counts in one round-trip
   const counts = await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .query(`
@@ -272,11 +272,8 @@ async function recomputeTimesheetFinalStatus(timesheetId) {
   const rejectedCnt = Number(row.RejectedCnt || 0);
   const totalCnt = Number(row.TotalCnt || 0);
 
-  // If nothing to compute, do nothing
   if (totalCnt <= 0) return;
 
-  // ✅ KEY FIX:
-  // If any approvals are still pending, the timesheet is NOT final (do not mark Rejected/Approved yet)
   if (pendingCnt > 0) {
     await pool.request()
       .input("TimesheetId", sql.Int, timesheetId)
@@ -290,7 +287,6 @@ async function recomputeTimesheetFinalStatus(timesheetId) {
     return;
   }
 
-  // No pending left => final state
   if (rejectedCnt > 0) {
     await pool.request()
       .input("TimesheetId", sql.Int, timesheetId)
@@ -305,7 +301,6 @@ async function recomputeTimesheetFinalStatus(timesheetId) {
     return;
   }
 
-  // No pending and no rejected => approved
   await pool.request()
     .input("TimesheetId", sql.Int, timesheetId)
     .query(`
@@ -362,13 +357,12 @@ async function setVendorReply(approvalId, vendorUserId, replyText) {
 }
 
 async function ensureApprovalTask(timesheetId, projectId, approverUserId) {
-  // This is identical to your createApprovalTask; naming makes Option A clearer.
   return createApprovalTask(timesheetId, projectId, approverUserId);
 }
 
 /**
- * ✅ When vendor resubmits after rejection:
- * - keep Comment/ActionAt/VendorReply/VendorReplyAt intact (audit trail)
+ * When vendor resubmits after rejection:
+ * - keep Comment/ActionAt/VendorReply/VendorReplyAt intact
  * - simply reopen rejected approvals so approvers can re-review
  */
 async function reopenApprovalsForResubmission(timesheetId) {
