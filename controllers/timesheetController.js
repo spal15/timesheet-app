@@ -193,9 +193,9 @@ function validateDayPayload(days, dayById, { submitMode = false } = {}) {
           errors.push(`${entryLabel}: Work Summary is required.`);
         }
 
-        if (!adoTickets) {
-          errors.push(`${entryLabel}: ADO Ticket is required.`);
-        }
+        //if (!adoTickets) {
+        //  errors.push(`${entryLabel}: ADO Ticket is required.`);
+        //}
 
         if (!Number.isFinite(hours)) {
           errors.push(`${entryLabel}: Hours must be a number.`);

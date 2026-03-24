@@ -316,14 +316,25 @@ LEFT JOIN dbo.Vendors v ON u.VendorId = v.VendorId
 LEFT JOIN dbo.Teams t ON u.TeamId = t.TeamId
 LEFT JOIN dbo.SubTeams st ON u.SubTeamId = st.SubTeamId;
 
+SELECT
+    u.Email AS VendorEmail,
+    u.DisplayName AS VendorName,
+    tm.TeamName,
+    st.SubTeamName
+FROM dbo.Users u
+JOIN dbo.SubTeams st
+    ON st.SubTeamId = u.SubTeamId
+JOIN dbo.Teams tm
+    ON tm.TeamId = st.TeamId
+ORDER BY
+    u.Email;
+
 -- Check approver mapping for Projects
 SELECT
   p.ProjectName,
   tm.TeamName,
   st.SubTeamName,
   psta.ApproverEmail,
-  psta.IsPrimary,
-  psta.ApprovalOrder,
   psta.IsActive
 FROM dbo.ProjectSubTeamApprovers psta
 JOIN dbo.Projects p ON p.ProjectId = psta.ProjectId

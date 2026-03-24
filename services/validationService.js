@@ -36,9 +36,9 @@ function validateSubmitTimesheet(body) {
       errors.push(`Row ${rowNum}: Work Summary is required.`);
     }
 
-    if (!adoTicket) {
-      errors.push(`Row ${rowNum}: ADO Ticket is required.`);
-    }
+   // if (!adoTicket) {
+     // errors.push(`Row ${rowNum}: ADO Ticket is required.`);
+    //}
   });
 
   return { rows, errors };
