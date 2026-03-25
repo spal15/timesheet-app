@@ -93,7 +93,7 @@ app.use(adminRoutes);
 // Health check
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3500;
 app.listen(port, () => {
   console.log(`Running on http://localhost:${port}`);
 });
