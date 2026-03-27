@@ -36,11 +36,21 @@ app.use((req, res, next) => {
 });
 
 /**
- * SSO middleware:
- * - reads user email from EasyAuth headers (or DEV_EMAIL in local)
- * - loads user record (role) from dbo.Users
+ * Anonymous diagnostic routes
+ * Keep these BEFORE requireUser so you can test app startup and EasyAuth.
  */
-app.use(requireUser);
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+app.get("/debug-auth", (req, res) => {
+  res.json({
+    principalName: req.header("X-MS-CLIENT-PRINCIPAL-NAME") || null,
+    hasPrincipalHeader: !!req.header("X-MS-CLIENT-PRINCIPAL"),
+    principalId: req.header("X-MS-CLIENT-PRINCIPAL-ID") || null,
+    identityProvider: req.header("X-MS-CLIENT-PRINCIPAL-IDP") || null
+  });
+});
 
 // Debug route to verify CSS is served
 app.get("/debug-static", (req, res) => {
@@ -49,7 +59,6 @@ app.get("/debug-static", (req, res) => {
       <head>
         <link rel="stylesheet" href="/styles.css?v=${Date.now()}">
         <style>
-          /* Inline hard-proof fallback */
           .inline-proof { border: 5px solid #6a0dad; padding: 12px; border-radius: 12px; background:#fff; }
         </style>
       </head>
@@ -81,6 +90,13 @@ app.get("/debug-static", (req, res) => {
   `);
 });
 
+/**
+ * SSO middleware:
+ * - reads user email from EasyAuth headers (or DEV_EMAIL in local)
+ * - loads user record (role) from dbo.Users
+ */
+app.use(requireUser);
+
 // Home
 app.get("/", (req, res) => res.redirect("/home"));
 app.get("/home", (req, res) => res.render("home"));
@@ -90,10 +106,7 @@ app.use(timesheetRoutes);
 app.use(approvalRoutes);
 app.use(adminRoutes);
 
-// Health check
-app.get("/health", (req, res) => res.json({ ok: true }));
-
 const port = process.env.PORT || 3500;
 app.listen(port, () => {
-  console.log(`Running on http://localhost:${port}`);
+  console.log(`Running on port ${port}`);
 });
