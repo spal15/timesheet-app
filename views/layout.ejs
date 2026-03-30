@@ -18,7 +18,7 @@
       <a href="/timesheets">My Timesheets</a>
     <% } %>
 
-    <% if (user && (user.Role === 'Approver' || user.Role === 'Admin')) { %>
+    <% if (user && (user.Role === 'Approver')) { %>
       <a href="/approvals">Approvals</a>
     <% } %>
 

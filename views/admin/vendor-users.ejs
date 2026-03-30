@@ -1,0 +1,64 @@
+<div class="page-header">
+  <h1>Vendor Users</h1>
+  <p>List of uploaded vendor users available in the system.</p>
+</div>
+
+<div class="form-actions" style="margin-bottom: 16px;">
+  <a href="/admin/vendor-upload" class="btn-primary">Upload Vendor Users</a>
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="summary-label">Total Vendor Users</div>
+    <div class="summary-value"><%= users.length %></div>
+  </div>
+</div>
+
+<div class="entity">
+  <div class="entity-name">Vendor User List</div>
+
+  <div class="table-wrapper">
+    <table class="modern-table">
+      <thead>
+        <tr>
+          <th>Display Name</th>
+          <th>Email</th>
+          <th>Vendor</th>
+          <th>Team</th>
+          <th>SubTeam</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Created At</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (!users || users.length === 0) { %>
+          <tr>
+            <td colspan="8" style="text-align:center;">No vendor users found.</td>
+          </tr>
+        <% } %>
+
+        <% users.forEach(function(user) { %>
+          <tr>
+            <td><%= user.DisplayName || "" %></td>
+            <td><%= user.Email || "" %></td>
+            <td><%= user.VendorName || "" %></td>
+            <td><%= user.TeamName || "" %></td>
+            <td><%= user.SubTeamName || "" %></td>
+            <td><%= user.Role || "" %></td>
+            <td>
+              <% if (user.IsActive) { %>
+                <span class="status-pill inserted">Active</span>
+              <% } else { %>
+                <span class="status-pill failed">Inactive</span>
+              <% } %>
+            </td>
+            <td>
+              <%= user.CreatedAt ? new Date(user.CreatedAt).toLocaleString() : "" %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
