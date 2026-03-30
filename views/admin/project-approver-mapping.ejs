@@ -1,0 +1,165 @@
+<div class="page-header">
+  <h1>Project Approver Mapping</h1>
+  <p>Map internal approvers to a project and subteam combination.</p>
+</div>
+
+<% if (errorMessage) { %>
+  <div class="alert alert-error"><%= errorMessage %></div>
+<% } %>
+
+<% if (successMessage) { %>
+  <div class="alert alert-success"><%= successMessage %></div>
+<% } %>
+
+<div class="entity">
+  <div class="entity-name">Add Mapping</div>
+
+  <form action="/admin/project-approver-mapping" method="POST" class="upload-form">
+    <div class="form-row">
+      <label for="projectId">Project</label>
+      <select id="projectId" name="projectId" required>
+        <option value="">Select Project</option>
+        <% projects.forEach(function(project) { %>
+          <option value="<%= project.ProjectId %>"><%= project.ProjectName %></option>
+        <% }) %>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label for="teamId">Team</label>
+      <select id="teamId" name="teamId" required>
+        <option value="">Select Team</option>
+        <% teams.forEach(function(team) { %>
+          <option value="<%= team.TeamId %>"><%= team.TeamName %></option>
+        <% }) %>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label for="subTeamId">SubTeam</label>
+      <select id="subTeamId" name="subTeamId" required>
+        <option value="">Select SubTeam</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label for="approverEmail">Internal User / Approver</label>
+      <select id="approverEmail" name="approverEmail" required>
+        <option value="">Select Internal User</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label for="isPrimary">Primary Approver</label>
+      <select id="isPrimary" name="isPrimary">
+        <option value="0">No</option>
+        <option value="1">Yes</option>
+      </select>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Add Mapping</button>
+    </div>
+  </form>
+</div>
+
+<div class="entity">
+  <div class="entity-name">Current Mappings</div>
+
+  <div class="table-wrapper">
+    <table class="modern-table">
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Team</th>
+          <th>SubTeam</th>
+          <th>Approver</th>
+          <th>Email</th>
+          <th>Primary</th>
+          <th>Created On</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (!mappings || mappings.length === 0) { %>
+          <tr>
+            <td colspan="8" style="text-align:center;">No mappings found.</td>
+          </tr>
+        <% } %>
+
+        <% mappings.forEach(function(item) { %>
+          <tr>
+            <td><%= item.ProjectName || "" %></td>
+            <td><%= item.TeamName || "" %></td>
+            <td><%= item.SubTeamName || "" %></td>
+            <td><%= item.DisplayName || "" %></td>
+            <td><%= item.ApproverEmail || "" %></td>
+            <td>
+              <% if (item.IsPrimary) { %>
+                <span class="status-pill inserted">Yes</span>
+              <% } else { %>
+                <span class="status-pill skipped">No</span>
+              <% } %>
+            </td>
+            <td><%= item.CreatedOn ? new Date(item.CreatedOn).toLocaleString() : "" %></td>
+            <td>
+              <form action="/admin/project-approver-mapping/delete" method="POST" onsubmit="return confirm('Remove this mapping?');">
+                <input type="hidden" name="mappingId" value="<%= item.ProjectSubTeamApproverId %>">
+                <button type="submit" class="btn-danger">Remove</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  const teamSelect = document.getElementById("teamId");
+  const subTeamSelect = document.getElementById("subTeamId");
+  const approverSelect = document.getElementById("approverEmail");
+
+  function resetSubTeams() {
+    subTeamSelect.innerHTML = '<option value="">Select SubTeam</option>';
+  }
+
+  function resetApprovers() {
+    approverSelect.innerHTML = '<option value="">Select Internal User</option>';
+  }
+
+  teamSelect.addEventListener("change", async function () {
+    const teamId = this.value;
+    resetSubTeams();
+    resetApprovers();
+
+    if (!teamId) return;
+
+    const response = await fetch(`/admin/subteams-by-team/${teamId}`);
+    const subTeams = await response.json();
+
+    subTeams.forEach(item => {
+      const option = document.createElement("option");
+      option.value = item.SubTeamId;
+      option.textContent = item.SubTeamName;
+      subTeamSelect.appendChild(option);
+    });
+  });
+
+  subTeamSelect.addEventListener("change", async function () {
+    const subTeamId = this.value;
+    resetApprovers();
+
+    if (!subTeamId) return;
+
+    const response = await fetch(`/admin/approvers-by-subteam/${subTeamId}`);
+    const users = await response.json();
+
+    users.forEach(item => {
+      const option = document.createElement("option");
+      option.value = item.Email;
+      option.textContent = `${item.DisplayName} (${item.Email})`;
+      approverSelect.appendChild(option);
+    });
+  });
+</script>

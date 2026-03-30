@@ -1,0 +1,96 @@
+<div class="page-header">
+  <h1>Internal User Upload</h1>
+  <p>Upload the internal user Excel template to add approvers into the system.</p>
+</div>
+
+<div class="form-actions" style="margin-bottom: 16px;">
+  <a href="/templates/internal_upload_template.xlsx" class="btn-secondary" download>
+    Download Template
+  </a>
+  <a href="/admin/internal-users" class="btn-primary">View Uploaded Internal Users</a>
+</div>
+
+<div class="entity">
+  <div class="entity-name">Upload Internal Users</div>
+
+  <% if (errorMessage) { %>
+    <div class="alert alert-error">
+      <%= errorMessage %>
+    </div>
+  <% } %>
+
+  <form action="/admin/internal-upload" method="POST" enctype="multipart/form-data" class="upload-form">
+    <div class="form-row">
+      <label for="internalFile">Excel File</label>
+      <input
+        type="file"
+        id="internalFile"
+        name="internalFile"
+        accept=".xlsx,.xls"
+        required
+      />
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Upload and Process</button>
+    </div>
+  </form>
+</div>
+
+<% if (result) { %>
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="summary-label">Total Rows</div>
+      <div class="summary-value"><%= result.totalRows %></div>
+    </div>
+    <div class="summary-card success">
+      <div class="summary-label">Inserted</div>
+      <div class="summary-value"><%= result.inserted %></div>
+    </div>
+    <div class="summary-card warning">
+      <div class="summary-label">Skipped</div>
+      <div class="summary-value"><%= result.skipped %></div>
+    </div>
+    <div class="summary-card error">
+      <div class="summary-label">Failed</div>
+      <div class="summary-value"><%= result.failed %></div>
+    </div>
+  </div>
+
+  <div class="entity">
+    <div class="entity-name">Upload Results</div>
+
+    <div class="table-wrapper">
+      <table class="modern-table">
+        <thead>
+          <tr>
+            <th>Row</th>
+            <th>Email</th>
+            <th>Display Name</th>
+            <th>Team</th>
+            <th>SubTeam</th>
+            <th>Status</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% result.details.forEach(function(item) { %>
+            <tr>
+              <td><%= item.rowNumber %></td>
+              <td><%= item.email %></td>
+              <td><%= item.displayName %></td>
+              <td><%= item.team %></td>
+              <td><%= item.subTeam %></td>
+              <td>
+                <span class="status-pill <%= item.status.toLowerCase() %>">
+                  <%= item.status %>
+                </span>
+              </td>
+              <td><%= item.message %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<% } %>

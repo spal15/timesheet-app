@@ -1,0 +1,60 @@
+<div class="page-header">
+  <h1>Internal Users</h1>
+  <p>List of uploaded internal approver users available in the system.</p>
+</div>
+
+<div class="form-actions" style="margin-bottom: 16px;">
+  <a href="/admin/internal-upload" class="btn-primary">Upload Internal Users</a>
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="summary-label">Total Internal Users</div>
+    <div class="summary-value"><%= users.length %></div>
+  </div>
+</div>
+
+<div class="entity">
+  <div class="entity-name">Internal User List</div>
+
+  <div class="table-wrapper">
+    <table class="modern-table">
+      <thead>
+        <tr>
+          <th>Display Name</th>
+          <th>Email</th>
+          <th>Team</th>
+          <th>SubTeam</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Created At</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (!users || users.length === 0) { %>
+          <tr>
+            <td colspan="7" style="text-align:center;">No internal users found.</td>
+          </tr>
+        <% } %>
+
+        <% users.forEach(function(user) { %>
+          <tr>
+            <td><%= user.DisplayName || "" %></td>
+            <td><%= user.Email || "" %></td>
+            <td><%= user.TeamName || "" %></td>
+            <td><%= user.SubTeamName || "" %></td>
+            <td><%= user.Role || "" %></td>
+            <td>
+              <% if (user.IsActive) { %>
+                <span class="status-pill inserted">Active</span>
+              <% } else { %>
+                <span class="status-pill failed">Inactive</span>
+              <% } %>
+            </td>
+            <td><%= user.CreatedAt ? new Date(user.CreatedAt).toLocaleString() : "" %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
