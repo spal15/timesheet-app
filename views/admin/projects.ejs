@@ -1,0 +1,92 @@
+
+<div class="entity-card">
+  <h2>Manage Projects</h2>
+
+  <% if (success) { %>
+    <div class="alert success"><%= success %></div>
+  <% } %>
+
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <!-- Add Project -->
+  <form method="POST" action="/admin/projects/add" class="inline-form">
+    <input
+      type="text"
+      name="projectName"
+      placeholder="Enter new project name"
+      required
+    />
+
+    <button type="submit" class="btn-primary">
+      + Add Project
+    </button>
+  </form>
+</div>
+
+<div class="entity-card">
+  <h3>Existing Projects</h3>
+
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th>Project Name</th>
+        <th>Status</th>
+        <th>Created On</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      <% if (projects && projects.length > 0) { %>
+
+        <% projects.forEach(function(p) { %>
+          <tr>
+            <td><%= p.ProjectName %></td>
+
+            <td>
+              <% if (p.IsActive) { %>
+                <span class="badge success">Active</span>
+              <% } else { %>
+                <span class="badge muted">Inactive</span>
+              <% } %>
+            </td>
+
+            <td>
+              <%= p.CreatedAt 
+                    ? new Date(p.CreatedAt).toLocaleDateString() 
+                    : '' %>
+            </td>
+
+            <td>
+          <form method="POST" action="/admin/projects/<%= p.ProjectId %>/toggle" onsubmit="return confirmToggle('<%= p.ProjectName %>', <%= p.IsActive ? 1 : 0 %>)">
+            <button type="submit" 
+                class="<%= p.IsActive ? 'btn-danger' : 'btn-success' %>">
+                
+                <%= p.IsActive ? 'Deactivate' : 'Activate' %>
+            </button>
+            </form>
+            </td>
+          </tr>
+        <% }) %>
+
+      <% } else { %>
+        <tr>
+          <td colspan="4" style="text-align:center;">
+            No projects found
+          </td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+<script>
+function confirmToggle(projectName, isActive) {
+  if (isActive) {
+    return confirm("Are you sure you want to DEACTIVATE project: " + projectName + " ?");
+  } else {
+    return confirm("Activate project: " + projectName + " ?");
+  }
+}
+</script>

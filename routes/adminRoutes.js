@@ -47,4 +47,10 @@ router.post("/admin/project-approver-mapping/delete", requireRole("Admin"), admi
 
 router.get("/admin", requireRole("Admin"), adminController.adminHomePage);
 
+router.get('/admin/projects', requireRole("Admin"), adminController.projectPage);
+
+router.post('/admin/projects/add', requireRole("Admin"), adminController.addProject);
+
+router.post('/admin/projects/:projectId/toggle', requireRole("Admin"), adminController.toggleProject);
+
 module.exports = router;

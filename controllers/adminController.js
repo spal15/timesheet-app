@@ -3,11 +3,19 @@ const vendorUploadService = require("../services/vendorUploadService");
 const internalUploadService = require("../services/internalUploadService");
 const projectApproverMappingService = require("../services/projectApproverMappingService");
 
+async function projectsPage(req, res, next) {
+  try {
+    const projects = await projectService.getAllProjects();
 
-async function projectsPage(req, res) {
-  const projects = await projectService.listProjectsWithApprovers();
-  const approvers = await projectService.listApproverUsers();
-  return res.render("admin_projects", { projects, approvers, error: null });
+    return res.render("admin/projects", {
+      title: "Manage Projects",
+      projects,
+      success: req.query.success,
+      error: req.query.error
+    });
+  } catch (err) {
+    next(err);
+  }
 }
 
 async function upsertProject(req, res) {
@@ -232,9 +240,43 @@ async function adminHomePage(req, res, next) {
   }
 }
 
+async function projectPage(req, res, next) {
+  try {
+    const projects = await projectService.getAllProjects();
+
+    res.render("admin/projects", {
+      title: "Manage Projects",
+      projects,
+      success: req.query.success,
+      error: req.query.error
+    });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function addProject(req, res, next) {
+  try {
+    await projectService.addProject(req.body.projectName);
+    res.redirect("/admin/projects?success=Project added");
+  } catch (err) {
+    res.redirect(`/admin/projects?error=${encodeURIComponent(err.message)}`);
+  }
+}
+
+async function toggleProject(req, res, next) {
+  try {
+    await projectService.toggleProject(req.params.projectId);
+    res.redirect("/admin/projects?success=Updated");
+  } catch (err) {
+    res.redirect(`/admin/projects?error=${encodeURIComponent(err.message)}`);
+  }
+}
+
 module.exports = { 
   projectsPage, upsertProject, getVendorUploadPage, uploadVendorUsers, getVendorUsersPage,
   getInternalUploadPage, uploadInternalUsers, getInternalUsersPage, getProjectApproverMappingPage, 
   addProjectApproverMapping, getSubTeamsByTeam, getApproversBySubTeam, deleteProjectApproverMapping,
-  adminHomePage
+  adminHomePage, projectPage, addProject, toggleProject
 };

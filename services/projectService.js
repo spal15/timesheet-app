@@ -119,6 +119,65 @@ async function getApproversForProjectAndSubTeam(projectId, subTeamId) {
   return r.recordset || [];
 }
 
+
+async function getAllProjects() {
+  const pool = await getPool();
+
+  const result = await pool.request().query(`
+    SELECT ProjectId, ProjectName, IsActive, CreatedAt
+    FROM dbo.Projects
+    ORDER BY IsActive DESC, ProjectName
+  `);
+
+  return result.recordset;
+}
+
+async function addProject(projectName) {
+  const name = (projectName || "").trim();
+
+  if (!name) {
+    throw new Error("Project name is required.");
+  }
+
+  const pool = await getPool();
+
+  await pool.request()
+    .input("ProjectName", sql.NVarChar(200), name)
+    .query(`
+      IF EXISTS (
+        SELECT 1 FROM dbo.Projects WHERE ProjectName = @ProjectName
+      )
+      BEGIN
+        THROW 50001, 'Project already exists.', 1;
+      END
+
+      INSERT INTO dbo.Projects (ProjectName, IsActive, CreatedAt)
+      VALUES (@ProjectName, 1, SYSUTCDATETIME());
+    `);
+}
+
+async function toggleProject(projectId) {
+  const id = Number(projectId);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("Invalid project id.");
+  }
+
+  const pool = await getPool();
+
+  await pool.request()
+    .input("ProjectId", sql.Int, id)
+    .query(`
+      UPDATE dbo.Projects
+      SET IsActive = CASE 
+          WHEN IsActive = 1 THEN 0 
+          ELSE 1 
+        END
+      WHERE ProjectId = @ProjectId;
+    `);
+}
+
+
 module.exports = {
   listProjectsWithApprovers,
   listApproverUsers,
@@ -126,5 +185,8 @@ module.exports = {
   getProjectMappingByName,
   listActiveProjects,
   getProjectByName,
-  getApproversForProjectAndSubTeam
+  getApproversForProjectAndSubTeam,
+  getAllProjects,
+  addProject,
+  toggleProject
 };
