@@ -193,9 +193,9 @@ function validateDayPayload(days, dayById, { submitMode = false } = {}) {
           errors.push(`${entryLabel}: Work Summary is required.`);
         }
 
-        //if (!adoTickets) {
-        //  errors.push(`${entryLabel}: ADO Ticket is required.`);
-        //}
+        // if (!adoTickets) {
+        //   errors.push(`${entryLabel}: ADO Ticket is required.`);
+        // }
 
         if (!Number.isFinite(hours)) {
           errors.push(`${entryLabel}: Hours must be a number.`);
@@ -388,159 +388,137 @@ async function submitTimesheet(req, res) {
   const weekEnding = String(req.body?.weekEnding || "").trim();
   const incomingDays = req.body?.days || [];
 
-  const wantsJson =
-    req.xhr ||
-    (req.headers.accept || "").includes("application/json") ||
-    (req.headers["content-type"] || "").includes("application/json");
-
+  /**
+   * Submit is called by fetch/JavaScript, so keep this endpoint JSON-only.
+   * This avoids Azure/iisnode returning generic HTML "Bad Request" pages
+   * and keeps local/Azure behavior consistent.
+   */
   const fail = (status, message, extra = {}) => {
-    return wantsJson
-      ? res.status(status).json({ ok: false, message, ...extra })
-      : res.status(status).send(message);
+    return res.status(status).json({
+      ok: false,
+      message,
+      ...extra
+    });
   };
 
-  const subTeamId = Number(req.user?.SubTeamId || 0);
-  if (!subTeamId) {
-    return fail(400, "Your SubTeam is not configured in dbo.Users. Ask admin to update your profile.");
-  }
-
-  if (!Number.isInteger(timesheetId) || timesheetId <= 0) return fail(400, "Invalid timesheet id");
-  if (!weekEnding) return fail(400, "weekEnding is required");
-
-  if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
-    return fail(400, "Invalid weekEnding date. Please select a valid week ending date.");
-  }
-
-  if (!Array.isArray(incomingDays) || incomingDays.length !== 7) {
-    return fail(400, "Submit must include 7 day objects.");
-  }
-
-  const header = await timesheetService.getTimesheetHeader(timesheetId);
-  if (!header) return fail(404, "Timesheet not found");
-  if (!["Draft", "Rejected"].includes(header.Status)) return fail(400, "Timesheet cannot be submitted.");
-
-  await timesheetService.ensure7Days(timesheetId, weekEnding);
-
-  const dbDays = await timesheetService.listTimesheetDays(timesheetId);
-  const projects = await projectService.listActiveProjects();
-
-  const dayById = new Map(
-    dbDays.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
-  );
-
-  const days = normalizeIncomingDays(incomingDays, dbDays);
-
-  const badId = days.find(d => !Number.isFinite(Number(d.timesheetDayId)) || !dayById.has(Number(d.timesheetDayId)));
-  if (badId) {
-    const msg =
-      "Submit payload is missing a valid timesheetDayId for one or more days. Please refresh the page and try again.";
-
-    if (wantsJson) return res.status(400).json({ ok: false, message: msg });
-
-    return res.render("timesheet_edit", {
-      timesheetId,
-      weekEnding,
-      status: header.Status,
-      days: await timesheetService.listTimesheetDaysWithEntries(timesheetId),
-      projects,
-      rejectedProjects: [],
-      maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
-      error: msg
-    });
-  }
-
-  const normalizedForSubmit = applyWeekendDefaults(days);
-  const errors = validateDayPayload(normalizedForSubmit, dayById, { submitMode: true });
-
-  if (errors.length) {
-    const msg =
-      "Please complete all fields correctly before submitting:\n" +
-      errors.map(e => `• ${e}`).join("\n");
-
-    if (wantsJson) return res.status(400).json({ ok: false, message: msg, errors });
-
-    return res.render("timesheet_edit", {
-      timesheetId,
-      weekEnding,
-      status: header.Status,
-      days: normalizedForSubmit,
-      projects,
-      rejectedProjects: [],
-      maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
-      error: msg
-    });
-  }
-
-  await timesheetService.updateTimesheetDayEntriesEditable(timesheetId, normalizedForSubmit);
-
-  const usedProjectNames = collectUsedProjectNames(normalizedForSubmit);
-  const projectByName = new Map(
-    (projects || []).map(p => [String(p.ProjectName || "").trim().toLowerCase(), p])
-  );
-
-  for (const projectName of usedProjectNames) {
-    const p = projectByName.get(String(projectName).trim().toLowerCase());
-    if (!p?.ProjectId) {
-      const msg = `Project "${projectName}" is not a valid active project.`;
-      if (wantsJson) return res.status(400).json({ ok: false, message: msg });
-
-      return res.render("timesheet_edit", {
-        timesheetId,
-        weekEnding,
-        status: header.Status,
-        days: normalizedForSubmit,
-        projects,
-        rejectedProjects: [],
-        maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
-        error: msg
-      });
+  try {
+    const subTeamId = Number(req.user?.SubTeamId || 0);
+    if (!subTeamId) {
+      return fail(400, "Your SubTeam is not configured in dbo.Users. Ask admin to update your profile.");
     }
 
-    const approvers = await projectService.getApproversForProjectAndSubTeam(Number(p.ProjectId), subTeamId);
-    if (!approvers || approvers.length === 0) {
+    if (!Number.isInteger(timesheetId) || timesheetId <= 0) {
+      return fail(400, "Invalid timesheet id");
+    }
+
+    if (!weekEnding) {
+      return fail(400, "weekEnding is required");
+    }
+
+    if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
+      return fail(400, "Invalid weekEnding date. Please select a valid week ending date.");
+    }
+
+    if (!Array.isArray(incomingDays) || incomingDays.length !== 7) {
+      return fail(400, "Submit must include 7 day objects.");
+    }
+
+    const header = await timesheetService.getTimesheetHeader(timesheetId);
+    if (!header) {
+      return fail(404, "Timesheet not found");
+    }
+
+    if (!["Draft", "Rejected"].includes(header.Status)) {
+      return fail(400, "Timesheet cannot be submitted.");
+    }
+
+    await timesheetService.ensure7Days(timesheetId, weekEnding);
+
+    const dbDays = await timesheetService.listTimesheetDays(timesheetId);
+    const projects = await projectService.listActiveProjects();
+
+    const dayById = new Map(
+      dbDays.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
+    );
+
+    const days = normalizeIncomingDays(incomingDays, dbDays);
+
+    const badId = days.find(d => !Number.isFinite(Number(d.timesheetDayId)) || !dayById.has(Number(d.timesheetDayId)));
+    if (badId) {
+      return fail(
+        400,
+        "Submit payload is missing a valid timesheetDayId for one or more days. Please refresh the page and try again."
+      );
+    }
+
+    const normalizedForSubmit = applyWeekendDefaults(days);
+    const errors = validateDayPayload(normalizedForSubmit, dayById, { submitMode: true });
+
+    if (errors.length) {
       const msg =
-        `Project "${projectName}" is not mapped to approvers for your SubTeam. ` +
-        `Ask admin to configure ProjectSubTeamApprovers.`;
+        "Please complete all fields correctly before submitting:\n" +
+        errors.map(e => `• ${e}`).join("\n");
 
-      if (wantsJson) return res.status(400).json({ ok: false, message: msg });
-
-      return res.render("timesheet_edit", {
-        timesheetId,
-        weekEnding,
-        status: header.Status,
-        days: normalizedForSubmit,
-        projects,
-        rejectedProjects: [],
-        maxEntriesPerDay: MAX_ENTRIES_PER_DAY,
-        error: msg
-      });
+      return fail(400, msg, { errors });
     }
-  }
 
-  if (String(header.Status) !== "Rejected") {
-    await approvalService.clearApprovalTasks(timesheetId);
-  }
+    await timesheetService.updateTimesheetDayEntriesEditable(timesheetId, normalizedForSubmit);
 
-  for (const projectName of usedProjectNames) {
-    const p = projectByName.get(String(projectName).trim().toLowerCase());
-    if (!p?.ProjectId) continue;
+    const usedProjectNames = collectUsedProjectNames(normalizedForSubmit);
+    const projectByName = new Map(
+      (projects || []).map(p => [String(p.ProjectName || "").trim().toLowerCase(), p])
+    );
 
-    const approvers = await projectService.getApproversForProjectAndSubTeam(Number(p.ProjectId), subTeamId);
+    for (const projectName of usedProjectNames) {
+      const p = projectByName.get(String(projectName).trim().toLowerCase());
+      if (!p?.ProjectId) {
+        return fail(400, `Project "${projectName}" is not a valid active project.`);
+      }
 
-    for (const a of approvers) {
-      await approvalService.ensureApprovalTask(timesheetId, Number(p.ProjectId), Number(a.UserId));
+      const approvers = await projectService.getApproversForProjectAndSubTeam(
+        Number(p.ProjectId),
+        subTeamId
+      );
+
+      if (!approvers || approvers.length === 0) {
+        const msg =
+          `Project "${projectName}" is not mapped to approvers for your SubTeam. ` +
+          "Ask admin to configure ProjectSubTeamApprovers.";
+
+        return fail(400, msg);
+      }
     }
+
+    if (String(header.Status) !== "Rejected") {
+      await approvalService.clearApprovalTasks(timesheetId);
+    }
+
+    for (const projectName of usedProjectNames) {
+      const p = projectByName.get(String(projectName).trim().toLowerCase());
+      if (!p?.ProjectId) continue;
+
+      const approvers = await projectService.getApproversForProjectAndSubTeam(
+        Number(p.ProjectId),
+        subTeamId
+      );
+
+      for (const a of approvers) {
+        await approvalService.ensureApprovalTask(timesheetId, Number(p.ProjectId), Number(a.UserId));
+      }
+    }
+
+    if (String(header.Status) === "Rejected") {
+      await approvalService.reopenApprovalsForResubmission(timesheetId);
+    }
+
+    await timesheetService.markSubmitted(timesheetId);
+    await timesheetService.addAudit(timesheetId, req.user.UserId, "Submitted");
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("submitTimesheet failed:", err);
+    return fail(500, err?.message || "Submit failed");
   }
-
-  if (String(header.Status) === "Rejected") {
-    await approvalService.reopenApprovalsForResubmission(timesheetId);
-  }
-
-  await timesheetService.markSubmitted(timesheetId);
-  await timesheetService.addAudit(timesheetId, req.user.UserId, "Submitted");
-
-  if (wantsJson) return res.json({ ok: true });
-  return res.redirect("/timesheets");
 }
 
 async function replyToRejection(req, res) {
@@ -551,12 +529,15 @@ async function replyToRejection(req, res) {
   if (!Number.isInteger(timesheetId) || timesheetId <= 0) {
     return res.status(400).json({ ok: false, message: "Invalid timesheet id" });
   }
+
   if (!Number.isInteger(approvalId) || approvalId <= 0) {
     return res.status(400).json({ ok: false, message: "Invalid approval id" });
   }
+
   if (!reply) {
     return res.status(400).json({ ok: false, message: "Reply is required" });
   }
+
   if (reply.length > 2000) {
     return res.status(400).json({ ok: false, message: "Reply is too long (max 2000 chars)." });
   }
