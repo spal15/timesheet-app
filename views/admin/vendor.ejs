@@ -1,0 +1,86 @@
+<div class="entity-card">
+  <h2>Manage Vendors</h2>
+
+  <% if (success) { %>
+    <div class="alert success"><%= success %></div>
+  <% } %>
+
+  <% if (error) { %>
+    <div class="alert error"><%= error %></div>
+  <% } %>
+
+  <form method="POST" action="/admin/vendors/add" class="inline-form">
+    <input
+      type="text"
+      name="vendorName"
+      placeholder="Enter vendor name"
+      required
+    />
+
+    <button type="submit" class="btn-primary">
+      + Add Vendor
+    </button>
+  </form>
+</div>
+
+<div class="entity-card">
+  <h3>Existing Vendors</h3>
+
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th>Vendor Name</th>
+        <th>Status</th>
+        <th>Created On</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      <% if (vendors && vendors.length > 0) { %>
+        <% vendors.forEach(function(v) { %>
+          <tr>
+            <td><%= v.VendorName %></td>
+
+            <td>
+              <% if (v.IsActive) { %>
+                <span class="badge success">Active</span>
+              <% } else { %>
+                <span class="badge muted">Inactive</span>
+              <% } %>
+            </td>
+
+            <td>
+              <%= v.CreatedOn ? new Date(v.CreatedOn).toLocaleDateString() : '' %>
+            </td>
+
+            <td>
+              <form method="POST" action="/admin/vendors/<%= v.VendorId %>/toggle"
+                    onsubmit="return confirmVendorToggle('<%= v.VendorName %>', <%= v.IsActive ? 1 : 0 %>)">
+
+                <button type="submit"
+                  class="<%= v.IsActive ? 'btn-danger' : 'btn-success' %>">
+                  <%= v.IsActive ? 'Deactivate' : 'Activate' %>
+                </button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      <% } else { %>
+        <tr>
+          <td colspan="4" style="text-align:center;">No vendors found</td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+
+<script>
+function confirmVendorToggle(vendorName, isActive) {
+  if (isActive) {
+    return confirm("Are you sure you want to DEACTIVATE vendor: " + vendorName + " ?");
+  }
+
+  return confirm("Activate vendor: " + vendorName + " ?");
+}
+</script>

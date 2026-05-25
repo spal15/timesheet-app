@@ -2,6 +2,7 @@ const projectService = require("../services/projectService");
 const vendorUploadService = require("../services/vendorUploadService");
 const internalUploadService = require("../services/internalUploadService");
 const projectApproverMappingService = require("../services/projectApproverMappingService");
+const vendorService = require("../services/vendorService");
 
 async function projectsPage(req, res, next) {
   try {
@@ -274,9 +275,43 @@ async function toggleProject(req, res, next) {
   }
 }
 
+async function vendorsPage(req, res, next) {
+  try {
+    const vendors = await vendorService.getAllVendors();
+
+    res.render("admin/vendor", {
+      title: "Manage Vendors",
+      vendors,
+      success: req.query.success,
+      error: req.query.error
+    });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function addVendor(req, res, next) {
+  try {
+    await vendorService.addVendor(req.body.vendorName);
+    res.redirect("/admin/vendors/manage?success=Vendor added");
+  } catch (err) {
+    res.redirect(`/admin/vendors/manage?error=${encodeURIComponent(err.message)}`);
+  }
+}
+
+async function toggleVendor(req, res, next) {
+  try {
+    await vendorService.toggleVendor(req.params.vendorId);
+    res.redirect("/admin/vendors/manage?success=Vendor updated");
+  } catch (err) {
+    res.redirect(`/admin/vendors/manage?error=${encodeURIComponent(err.message)}`);
+  }
+}
+
 module.exports = { 
   projectsPage, upsertProject, getVendorUploadPage, uploadVendorUsers, getVendorUsersPage,
   getInternalUploadPage, uploadInternalUsers, getInternalUsersPage, getProjectApproverMappingPage, 
   addProjectApproverMapping, getSubTeamsByTeam, getApproversBySubTeam, deleteProjectApproverMapping,
-  adminHomePage, projectPage, addProject, toggleProject
+  adminHomePage, projectPage, addProject, toggleProject, vendorsPage, addVendor, toggleVendor
 };

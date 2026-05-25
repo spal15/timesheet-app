@@ -53,4 +53,10 @@ router.post('/admin/projects/add', requireRole("Admin"), adminController.addProj
 
 router.post('/admin/projects/:projectId/toggle', requireRole("Admin"), adminController.toggleProject);
 
+router.get('/admin/vendors/manage', requireRole("Admin"), adminController.vendorsPage);
+
+router.post('/admin/vendors/add', requireRole("Admin"), adminController.addVendor);
+
+router.post('/admin/vendors/:vendorId/toggle', requireRole("Admin"), adminController.toggleVendor);
+
 module.exports = router;
