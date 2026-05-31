@@ -377,6 +377,32 @@ async function reopenApprovalsForResubmission(timesheetId) {
     `);
 }
 
+async function getDefaultApprover() {
+  const email = process.env.DEFAULT_APPROVER_EMAIL;
+
+  if (!email) {
+    throw new Error("DEFAULT_APPROVER_EMAIL is not configured.");
+  }
+
+  const pool = await getPool();
+
+  const result = await pool.request()
+    .input("Email", sql.NVarChar(255), email)
+    .query(`
+      SELECT TOP 1 UserId, Email, DisplayName
+      FROM dbo.Users
+      WHERE Email = @Email
+        AND IsActive = 1
+        AND Role IN ('Approver', 'Admin')
+    `);
+
+  if (!result.recordset.length) {
+    throw new Error("Default approver not found or inactive.");
+  }
+
+  return result.recordset[0];
+}
+
 module.exports = {
   clearApprovalTasks,
   createApprovalTask,
@@ -390,5 +416,6 @@ module.exports = {
   getRejectedApprovalForVendor,
   setVendorReply,
   reopenApprovalsForResubmission,
-  ensureApprovalTask
+  ensureApprovalTask,
+  getDefaultApprover
 };

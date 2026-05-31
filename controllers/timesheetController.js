@@ -475,7 +475,7 @@ async function submitTimesheet(req, res) {
         return fail(400, `Project "${projectName}" is not a valid active project.`);
       }
 
-      const approvers = await projectService.getApproversForProjectAndSubTeam(
+      /*const approvers = await projectService.getApproversForProjectAndSubTeam(
         Number(p.ProjectId),
         subTeamId
       );
@@ -486,25 +486,36 @@ async function submitTimesheet(req, res) {
           "Ask admin to configure ProjectSubTeamApprovers.";
 
         return fail(400, msg);
-      }
+      }*/
     }
 
     if (String(header.Status) !== "Rejected") {
       await approvalService.clearApprovalTasks(timesheetId);
     }
 
+   // for (const projectName of usedProjectNames) {
+   //   const p = projectByName.get(String(projectName).trim().toLowerCase());
+   //   if (!p?.ProjectId) continue;
+   // const approvers = await projectService.getApproversForProjectAndSubTeam(
+   //     Number(p.ProjectId),
+   //     subTeamId
+   //   );
+
+   //   for (const a of approvers) {
+       // await approvalService.ensureApprovalTask(timesheetId, Number(p.ProjectId), Number(a.UserId));
+   // } }
+    // For simplicity, assign all approvals to the default approver on submission.}
+
+    const defaultApprover = await approvalService.getDefaultApprover();
+
     for (const projectName of usedProjectNames) {
       const p = projectByName.get(String(projectName).trim().toLowerCase());
       if (!p?.ProjectId) continue;
-
-      const approvers = await projectService.getApproversForProjectAndSubTeam(
+      await approvalService.ensureApprovalTask(
+        timesheetId,
         Number(p.ProjectId),
-        subTeamId
+        Number(defaultApprover.UserId)
       );
-
-      for (const a of approvers) {
-        await approvalService.ensureApprovalTask(timesheetId, Number(p.ProjectId), Number(a.UserId));
-      }
     }
 
     if (String(header.Status) === "Rejected") {

@@ -348,8 +348,8 @@ ADD VendorReply NVARCHAR(2000) NULL,
 
 
 
- delete from TimesheetAudit
- delete from TimesheetProjectApprovals
- delete from TimesheetDayEntries
- delete from TimesheetDays
- delete from Timesheets
+ --delete from TimesheetAudit
+ --delete from TimesheetProjectApprovals
+ --delete from TimesheetDayEntries
+ --delete from TimesheetDays
+ --delete from Timesheets
