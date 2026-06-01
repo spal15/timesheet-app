@@ -28,9 +28,9 @@ function validateSubmitTimesheet(body) {
       errors.push(`Row ${rowNum}: Project is required.`);
     }
 
-    if (!Number.isFinite(hours) || hours <= 0) {
-      errors.push(`Row ${rowNum}: Hours must be greater than 0.`);
-    }
+    //if (!Number.isFinite(hours) || hours <= 0) {
+    //  errors.push(`Row ${rowNum}: Hours must be greater than 0.`);
+    //}
 
     if (!summary) {
       errors.push(`Row ${rowNum}: Work Summary is required.`);

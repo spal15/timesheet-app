@@ -606,11 +606,12 @@
             } else {
               const isNonWorking = project.toLowerCase() === "non-working" || project.toLowerCase() === "non working";
 
-              if (isNonWorking) {
+              /*if (isNonWorking) {
                 if (hours !== 0) errors.push(`${rowLabel}: Non-Working hours must be 0.`);
-              } else {
+              } 
+              else {
                 if (hours <= 0) errors.push(`${rowLabel}: Hours must be greater than 0.`);
-              }
+              }*/
 
               dayTotal += hours;
             }

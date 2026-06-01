@@ -199,11 +199,13 @@ function validateDayPayload(days, dayById, { submitMode = false } = {}) {
 
         if (!Number.isFinite(hours)) {
           errors.push(`${entryLabel}: Hours must be a number.`);
-        } else if (hours < 0) {
+        } 
+        else if (hours < 0) {
           errors.push(`${entryLabel}: Hours cannot be negative.`);
-        } else if (!isNonWorking && hours <= 0) {
-          errors.push(`${entryLabel}: Hours must be greater than 0.`);
-        }
+        } 
+       // else if (!isNonWorking && hours <= 0) {
+       //   errors.push(`${entryLabel}: Hours must be greater than 0.`);
+       // }
       }
     }
 
