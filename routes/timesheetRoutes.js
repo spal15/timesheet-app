@@ -3,6 +3,7 @@ const router = express.Router();
 const timesheetController = require("../controllers/timesheetController");
 const { requireRole } = require("../middleware/ssoMiddleware");
 const { validateSubmitTimesheet } = require("../services/validationService");
+const vendorReportController = require("../controllers/vendorReportController");
 
 function submitValidationMiddleware(req, res, next) {
   const { rows, errors } = validateSubmitTimesheet(req.body);
@@ -22,6 +23,18 @@ router.post("/timesheets/:id/save", requireRole("Vendor"), timesheetController.s
 router.post("/timesheets/:id/submit", requireRole("Vendor"), timesheetController.submitTimesheet);
 
 router.post("/timesheets/:id/approvals/:approvalId/reply", requireRole("Vendor"), timesheetController.replyToRejection);
+
+router.get(
+  "/vendor/reports",
+  requireRole("Vendor"),
+  vendorReportController.reportPage
+);
+
+router.get(
+  "/vendor/reports/monthly-approved-time",
+  requireRole("Vendor"),
+  vendorReportController.downloadMonthlyApprovedTime
+);
 
 module.exports = router;
 

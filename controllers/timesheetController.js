@@ -203,9 +203,9 @@ function validateDayPayload(days, dayById, { submitMode = false } = {}) {
         else if (hours < 0) {
           errors.push(`${entryLabel}: Hours cannot be negative.`);
         } 
-       // else if (!isNonWorking && hours <= 0) {
-       //   errors.push(`${entryLabel}: Hours must be greater than 0.`);
-       // }
+        else if (!isNonWorking && hours <= 0) {
+          errors.push(`${entryLabel}: Hours must be greater than 0.`);
+        }
       }
     }
 

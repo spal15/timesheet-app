@@ -1,0 +1,47 @@
+<div class="report-page">
+  <div class="report-card">
+    <div class="report-header">
+      <h2>My Reports</h2>
+      <p class="report-subtitle">
+        Download your approved timesheet report by month.
+      </p>
+    </div>
+
+    <% if (error) { %>
+      <div class="alert error"><%= error %></div>
+    <% } %>
+
+    <form method="GET" action="/vendor/reports/monthly-approved-time" class="report-form">
+      <div class="form-group month-group">
+        <label>Month</label>
+        <select name="month" required>
+          <% for (let m = 1; m <= 12; m++) { %>
+            <option value="<%= m %>" <%= Number(month) === m ? "selected" : "" %>>
+              <%= new Date(2026, m - 1, 1).toLocaleString("default", { month: "long" }) %>
+            </option>
+          <% } %>
+        </select>
+      </div>
+
+      <div class="form-group year-group">
+        <label>Year</label>
+        <select name="year" required>
+          <% 
+            const currentYear = new Date().getFullYear();
+            for (let y = currentYear + 1; y >= currentYear - 1; y--) { 
+          %>
+            <option value="<%= y %>" <%= Number(year) === y ? "selected" : "" %>>
+              <%= y %>
+            </option>
+          <% } %>
+        </select>
+      </div>
+
+      <div class="form-action">
+        <button type="submit" class="btn-primary report-btn">
+          Download Report
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
