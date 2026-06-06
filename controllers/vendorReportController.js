@@ -29,10 +29,10 @@ async function downloadMonthlyApprovedTime(req, res, next) {
     year,
     month
     );
-    
+
     const headers = [
-      "VendorName",
-      "VendorEmail",
+      "VendorResourceName",
+      "VendorResourceEmail",
       "WeekEndingDate",
       "ProjectName",
       "WorkDate",

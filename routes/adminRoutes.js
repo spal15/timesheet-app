@@ -4,6 +4,8 @@ const multer = require("multer");
 const router = express.Router();
 const adminController = require("../controllers/adminController");
 const { requireRole } = require("../middleware/ssoMiddleware");
+const adminReportController = require("../controllers/adminReportController");
+
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -58,5 +60,23 @@ router.get('/admin/vendors/manage', requireRole("Admin"), adminController.vendor
 router.post('/admin/vendors/add', requireRole("Admin"), adminController.addVendor);
 
 router.post('/admin/vendors/:vendorId/toggle', requireRole("Admin"), adminController.toggleVendor);
+
+router.get(
+  "/admin/reports",
+  requireRole("Admin"),
+  adminReportController.reportPage
+);
+
+router.get(
+  "/admin/reports/monthly-vendor-hours",
+  requireRole("Admin"),
+  adminReportController.downloadMonthlyVendorHours
+);
+
+router.get(
+  "/admin/reports/monthly-resource-hours",
+  requireRole("Admin"),
+  adminReportController.downloadMonthlyResourceHours
+);
 
 module.exports = router;

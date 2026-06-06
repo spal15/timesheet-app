@@ -1,0 +1,90 @@
+<div class="report-page">
+  <div class="report-card">
+    <div class="report-header">
+      <h2>Admin Reports</h2>
+      <p class="report-subtitle">
+        Download monthly approved hours for vendor invoice validation.
+      </p>
+    </div>
+
+    <% if (error) { %>
+      <div class="alert error"><%= error %></div>
+    <% } %>
+
+    <div class="admin-report-grid">
+
+      <div class="admin-report-box">
+        <h3>Vendor-wise Monthly Hours</h3>
+        <p>Total approved hours grouped by vendor.</p>
+
+        <form method="GET" action="/admin/reports/monthly-vendor-hours" class="report-form compact-report-form">
+          <div class="form-group month-group">
+            <label>Month</label>
+            <select name="month" required>
+              <% for (let m = 1; m <= 12; m++) { %>
+                <option value="<%= m %>" <%= Number(month) === m ? "selected" : "" %>>
+                  <%= new Date(2026, m - 1, 1).toLocaleString("default", { month: "long" }) %>
+                </option>
+              <% } %>
+            </select>
+          </div>
+
+          <div class="form-group year-group">
+            <label>Year</label>
+            <select name="year" required>
+              <%
+                const currentYear = new Date().getFullYear();
+                for (let y = currentYear + 1; y >= currentYear - 2; y--) {
+              %>
+                <option value="<%= y %>" <%= Number(year) === y ? "selected" : "" %>>
+                  <%= y %>
+                </option>
+              <% } %>
+            </select>
+          </div>
+
+          <button type="submit" class="btn-primary report-btn">
+            Download Vendor Report
+          </button>
+        </form>
+      </div>
+
+      <div class="admin-report-box">
+        <h3>Resource-wise Monthly Hours</h3>
+        <p>Total approved hours grouped by vendor resource.</p>
+
+        <form method="GET" action="/admin/reports/monthly-resource-hours" class="report-form compact-report-form">
+          <div class="form-group month-group">
+            <label>Month</label>
+            <select name="month" required>
+              <% for (let m = 1; m <= 12; m++) { %>
+                <option value="<%= m %>" <%= Number(month) === m ? "selected" : "" %>>
+                  <%= new Date(2026, m - 1, 1).toLocaleString("default", { month: "long" }) %>
+                </option>
+              <% } %>
+            </select>
+          </div>
+
+          <div class="form-group year-group">
+            <label>Year</label>
+            <select name="year" required>
+              <%
+                const currentYear2 = new Date().getFullYear();
+                for (let y = currentYear2 + 1; y >= currentYear2 - 2; y--) {
+              %>
+                <option value="<%= y %>" <%= Number(year) === y ? "selected" : "" %>>
+                  <%= y %>
+                </option>
+              <% } %>
+            </select>
+          </div>
+
+          <button type="submit" class="btn-primary report-btn">
+            Download Resource Report
+          </button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</div>

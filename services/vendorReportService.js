@@ -9,8 +9,8 @@ async function getVendorMonthlyApprovedTime(vendorUserId, year, month) {
     .input("Month", sql.Int, month)
     .query(`
       SELECT
-        vendor.DisplayName AS VendorName,
-        vendor.Email AS VendorEmail,
+        vendor.DisplayName AS VendorResourceName,
+        vendor.Email AS VendorResourceEmail,
         t.TimesheetId,
         CONVERT(varchar(10), t.WeekEndingDate, 120) AS WeekEndingDate,
         CONVERT(varchar(10), td.WorkDate, 120) AS WorkDate,

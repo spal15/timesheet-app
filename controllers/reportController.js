@@ -12,8 +12,8 @@ async function downloadMonthlyApprovedTime(req, res, next) {
     const rows = await reportService.getMonthlyApprovedTime(year, month);
 
     const headers = [
-      "VendorName",
-      "VendorEmail",
+      "VendorResourceName",
+      "VendorResourceEmail",
       "WeekEndingDate",
       "ProjectName",
       "WorkDate",
