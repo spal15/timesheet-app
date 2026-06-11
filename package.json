@@ -16,15 +16,15 @@
   },
   "dependencies": {
     "dotenv": "^16.6.1",
-    "ejs": "^3.1.10",
-    "express": "^4.22.1",
+    "ejs": "^6.0.1",
+    "express": "^4.22.2",
     "express-ejs-layouts": "^2.5.1",
     "express-session": "^1.18.0",
-    "mssql": "^10.0.4",
+    "mssql": "^12.5.5",
     "multer": "^2.1.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.14"
   }
 }
