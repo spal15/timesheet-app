@@ -101,8 +101,45 @@ async function downloadMonthlyResourceHours(req, res, next) {
   }
 }
 
+async function downloadWeeklyVendorTimeReport(req, res, next) {
+  try {
+    const params = validateYearMonth(req, res);
+    if (!params) return;
+
+    const { year, month } = params;
+
+    const rows = await adminReportService.getWeeklyVendorTimeReport(year, month);
+
+    const headers = [
+      "VendorName",
+      "ResourceName",
+      "ResourceEmail",
+      "TimesheetId",
+      "WeekEndingDate",
+      "WorkDate",
+      "ProjectName",
+      "Hours",
+      "Status",
+      "SubmittedAt"
+    ];
+
+    const csv = buildCsv(headers, rows);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="weekly-vendor-time-report-${year}-${String(month).padStart(2, "0")}.csv"`
+    );
+
+    return res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   reportPage,
   downloadMonthlyVendorHours,
-  downloadMonthlyResourceHours
+  downloadMonthlyResourceHours,
+  downloadWeeklyVendorTimeReport
 };

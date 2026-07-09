@@ -79,4 +79,10 @@ router.get(
   adminReportController.downloadMonthlyResourceHours
 );
 
+router.get(
+  "/admin/reports/weekly-vendor-time-report",
+  requireRole("Admin"),
+  adminReportController.downloadWeeklyVendorTimeReport
+);
+
 module.exports = router;

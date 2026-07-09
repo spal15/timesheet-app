@@ -348,8 +348,44 @@ ADD VendorReply NVARCHAR(2000) NULL,
 
 
 
- --delete from TimesheetAudit
- --delete from TimesheetProjectApprovals
- --delete from TimesheetDayEntries
- --delete from TimesheetDays
- --delete from Timesheets
+DECLARE @VendorUserId INT = ddd;
+
+DELETE FROM TimesheetProjectApprovals
+WHERE TimesheetId IN
+(
+    SELECT TimesheetId
+    FROM Timesheets
+    WHERE VendorUserId = @VendorUserId
+);
+
+DELETE FROM TimesheetDayEntries
+WHERE TimesheetDayId IN
+(
+    SELECT TimesheetDayId
+    FROM TimesheetDays
+    WHERE TimesheetId IN
+    (
+        SELECT TimesheetId
+        FROM Timesheets
+        WHERE VendorUserId = @VendorUserId
+    )
+);
+
+DELETE FROM TimesheetDays
+WHERE TimesheetId IN
+(
+    SELECT TimesheetId
+    FROM Timesheets
+    WHERE VendorUserId = @VendorUserId
+);
+
+DELETE FROM TimesheetAudit
+WHERE TimesheetId IN
+(
+    SELECT TimesheetId
+    FROM Timesheets
+    WHERE VendorUserId = @VendorUserId
+);
+
+DELETE FROM Timesheets
+WHERE VendorUserId = @VendorUserId;

@@ -13,6 +13,42 @@
 
     <div class="admin-report-grid">
 
+    <div class="admin-report-box">
+    <h3>Weekly Vendor Time Report</h3>
+    <p>Submitted, approved, and rejected weekly hours grouped by vendor resource and project.</p>
+
+    <form method="GET" action="/admin/reports/weekly-vendor-time-report" class="report-form compact-report-form">
+      <div class="form-group month-group">
+        <label>Month</label>
+        <select name="month" required>
+          <% for (let m = 1; m <= 12; m++) { %>
+            <option value="<%= m %>" <%= Number(month) === m ? "selected" : "" %>>
+              <%= new Date(2026, m - 1, 1).toLocaleString("default", { month: "long" }) %>
+            </option>
+          <% } %>
+        </select>
+      </div>
+
+      <div class="form-group year-group">
+        <label>Year</label>
+        <select name="year" required>
+          <%
+            const currentYear3 = new Date().getFullYear();
+            for (let y = currentYear3 + 1; y >= currentYear3 - 2; y--) {
+          %>
+            <option value="<%= y %>" <%= Number(year) === y ? "selected" : "" %>>
+              <%= y %>
+            </option>
+          <% } %>
+        </select>
+      </div>
+
+      <button type="submit" class="btn-primary report-btn">
+        Download Weekly Report
+      </button>
+    </form>
+  </div>
+
       <div class="admin-report-box">
         <h3>Vendor-wise Monthly Hours</h3>
         <p>Total approved hours grouped by vendor.</p>

@@ -1,0 +1,87 @@
+<h2>Weekly Vendor Time Report</h2>
+
+<form method="GET">
+    <label>Week Ending Date</label>
+
+    <input 
+        type="date"
+        name="weekEndingDate"
+        value="<%= weekEndingDate %>"
+    />
+
+    <button class="btn btn-primary">
+        Search
+    </button>
+</form>
+
+
+<table class="table table-striped mt-3">
+
+<thead>
+<tr>
+    <th>Vendor</th>
+    <th>Resource</th>
+    <th>Email</th>
+    <th>Work Date</th>
+    <th>Project</th>
+    <th>Hours</th>
+    <th>Status</th>
+</tr>
+</thead>
+
+
+<tbody>
+
+<% report.forEach(row => { %>
+
+<tr>
+
+<td><%= row.VendorName %></td>
+
+<td><%= row.ResourceName %></td>
+
+<td><%= row.ResourceEmail %></td>
+
+<td>
+<%= row.WorkDate.toISOString().substring(0,10) %>
+</td>
+
+<td>
+<%= row.ProjectName %>
+</td>
+
+<td>
+<%= row.Hours %>
+</td>
+
+<td>
+
+<% if(row.Status === "Approved") { %>
+
+<span class="badge bg-success">
+Approved
+</span>
+
+<% } else if(row.Status === "Submitted") { %>
+
+<span class="badge bg-warning">
+Submitted
+</span>
+
+<% } else { %>
+
+<span class="badge bg-danger">
+Rejected
+</span>
+
+<% } %>
+
+</td>
+
+</tr>
+
+<% }) %>
+
+</tbody>
+
+</table>
