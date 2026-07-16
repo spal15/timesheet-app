@@ -405,8 +405,12 @@ async function submitTimesheet(req, res) {
 
   try {
     const subTeamId = Number(req.user?.SubTeamId || 0);
+
     if (!subTeamId) {
-      return fail(400, "Your SubTeam is not configured in dbo.Users. Ask admin to update your profile.");
+      return fail(
+        400,
+        "Your SubTeam is not configured in dbo.Users. Ask admin to update your profile."
+      );
     }
 
     if (!Number.isInteger(timesheetId) || timesheetId <= 0) {
@@ -418,7 +422,10 @@ async function submitTimesheet(req, res) {
     }
 
     if (!isValidISODate(weekEnding) || !isWeekEndingAllowed(weekEnding)) {
-      return fail(400, "Invalid weekEnding date. Please select a valid week ending date.");
+      return fail(
+        400,
+        "Invalid weekEnding date. Please select a valid week ending date."
+      );
     }
 
     if (!Array.isArray(incomingDays) || incomingDays.length !== 7) {
@@ -426,11 +433,12 @@ async function submitTimesheet(req, res) {
     }
 
     const header = await timesheetService.getTimesheetHeader(timesheetId);
+
     if (!header) {
       return fail(404, "Timesheet not found");
     }
 
-    if (!["Draft", "Rejected"].includes(header.Status)) {
+    if (!["Draft", "Rejected"].includes(String(header.Status))) {
       return fail(400, "Timesheet cannot be submitted.");
     }
 
@@ -440,12 +448,26 @@ async function submitTimesheet(req, res) {
     const projects = await projectService.listActiveProjects();
 
     const dayById = new Map(
-      dbDays.map(d => [Number(d.TimesheetDayId), { DayName: d.DayName, WorkDate: d.WorkDate }])
+      dbDays.map((day) => [
+        Number(day.TimesheetDayId),
+        {
+          DayName: day.DayName,
+          WorkDate: day.WorkDate
+        }
+      ])
     );
 
     const days = normalizeIncomingDays(incomingDays, dbDays);
 
-    const badId = days.find(d => !Number.isFinite(Number(d.timesheetDayId)) || !dayById.has(Number(d.timesheetDayId)));
+    const badId = days.find((day) => {
+      const timesheetDayId = Number(day.timesheetDayId);
+
+      return (
+        !Number.isFinite(timesheetDayId) ||
+        !dayById.has(timesheetDayId)
+      );
+    });
+
     if (badId) {
       return fail(
         400,
@@ -454,85 +476,196 @@ async function submitTimesheet(req, res) {
     }
 
     const normalizedForSubmit = applyWeekendDefaults(days);
-    const errors = validateDayPayload(normalizedForSubmit, dayById, { submitMode: true });
 
-    if (errors.length) {
-      const msg =
-        "Please complete all fields correctly before submitting:\n" +
-        errors.map(e => `• ${e}`).join("\n");
-
-      return fail(400, msg, { errors });
-    }
-
-    await timesheetService.updateTimesheetDayEntriesEditable(timesheetId, normalizedForSubmit);
-
-    const usedProjectNames = collectUsedProjectNames(normalizedForSubmit);
-    const projectByName = new Map(
-      (projects || []).map(p => [String(p.ProjectName || "").trim().toLowerCase(), p])
+    const errors = validateDayPayload(
+      normalizedForSubmit,
+      dayById,
+      { submitMode: true }
     );
 
-    for (const projectName of usedProjectNames) {
-      const p = projectByName.get(String(projectName).trim().toLowerCase());
-      if (!p?.ProjectId) {
-        return fail(400, `Project "${projectName}" is not a valid active project.`);
-      }
+    if (errors.length > 0) {
+      const message =
+        "Please complete all fields correctly before submitting:\n" +
+        errors.map((error) => `• ${error}`).join("\n");
 
-      /*const approvers = await projectService.getApproversForProjectAndSubTeam(
-        Number(p.ProjectId),
-        subTeamId
-      );
-
-      if (!approvers || approvers.length === 0) {
-        const msg =
-          `Project "${projectName}" is not mapped to approvers for your SubTeam. ` +
-          "Ask admin to configure ProjectSubTeamApprovers.";
-
-        return fail(400, msg);
-      }*/
+      return fail(400, message, { errors });
     }
 
+    /*
+     * Save the latest timesheet entry values before creating approvals.
+     */
+    await timesheetService.updateTimesheetDayEntriesEditable(
+      timesheetId,
+      normalizedForSubmit
+    );
+
+    /*
+     * Collect only projects that have more than zero hours.
+     * Non-Working projects are excluded by collectUsedProjectNames().
+     */
+    const usedProjectNames =
+      collectUsedProjectNames(normalizedForSubmit);
+
+    const projectByName = new Map(
+      (projects || []).map((project) => [
+        String(project.ProjectName || "")
+          .trim()
+          .toLowerCase(),
+        project
+      ])
+    );
+
+    /*
+     * Validate that every submitted project is still an active project.
+     */
+    for (const projectName of usedProjectNames) {
+      const normalizedProjectName = String(projectName)
+        .trim()
+        .toLowerCase();
+
+      const project = projectByName.get(normalizedProjectName);
+
+      if (!project?.ProjectId) {
+        return fail(
+          400,
+          `Project "${projectName}" is not a valid active project.`
+        );
+      }
+    }
+
+    /*
+     * On a fresh submission, remove old approval tasks before
+     * creating the current approval assignments.
+     *
+     * For rejected timesheets, preserve the existing approval records
+     * because reopenApprovalsForResubmission() will reopen them.
+     */
     if (String(header.Status) !== "Rejected") {
       await approvalService.clearApprovalTasks(timesheetId);
     }
 
-   // for (const projectName of usedProjectNames) {
-   //   const p = projectByName.get(String(projectName).trim().toLowerCase());
-   //   if (!p?.ProjectId) continue;
-   // const approvers = await projectService.getApproversForProjectAndSubTeam(
-   //     Number(p.ProjectId),
-   //     subTeamId
-   //   );
+    /*
+     * Load the default approver only when it is actually needed.
+     */
+    let defaultApprover = null;
 
-   //   for (const a of approvers) {
-       // await approvalService.ensureApprovalTask(timesheetId, Number(p.ProjectId), Number(a.UserId));
-   // } }
-    // For simplicity, assign all approvals to the default approver on submission.}
-
-    const defaultApprover = await approvalService.getDefaultApprover();
-
+    /*
+     * Approval assignment:
+     *
+     * 1. Check for approver(s) mapped to Project + SubTeam.
+     * 2. If mapped approver(s) exist, assign to them.
+     * 3. If no mapped approver exists, assign to the default approver.
+     */
     for (const projectName of usedProjectNames) {
-      const p = projectByName.get(String(projectName).trim().toLowerCase());
-      if (!p?.ProjectId) continue;
+      const normalizedProjectName = String(projectName)
+        .trim()
+        .toLowerCase();
+
+      const project = projectByName.get(normalizedProjectName);
+
+      if (!project?.ProjectId) {
+        continue;
+      }
+
+      const projectId = Number(project.ProjectId);
+
+      const mappedApprovers =
+        await projectService.getApproversForProjectAndSubTeam(
+          projectId,
+          subTeamId
+        );
+
+      /*
+       * Remove invalid or duplicate approver IDs.
+       */
+      const validApproverIds = [
+        ...new Set(
+          (Array.isArray(mappedApprovers)
+            ? mappedApprovers
+            : []
+          )
+            .map((approver) => Number(approver?.UserId))
+            .filter(
+              (userId) =>
+                Number.isInteger(userId) &&
+                userId > 0
+            )
+        )
+      ];
+
+      /*
+       * Use mapped project/SubTeam approvers when available.
+       */
+      if (validApproverIds.length > 0) {
+        for (const approverUserId of validApproverIds) {
+          await approvalService.ensureApprovalTask(
+            timesheetId,
+            projectId,
+            approverUserId
+          );
+        }
+
+        continue;
+      }
+
+      /*
+       * No project/SubTeam approver is mapped.
+       * Use the default approver instead of returning an error to the UI.
+       */
+      if (!defaultApprover) {
+        defaultApprover =
+          await approvalService.getDefaultApprover();
+
+        const defaultApproverUserId =
+          Number(defaultApprover?.UserId);
+
+        if (
+          !Number.isInteger(defaultApproverUserId) ||
+          defaultApproverUserId <= 0
+        ) {
+          throw new Error(
+            "No approver is mapped to the project and no default approver is configured. Please contact the administrator."
+          );
+        }
+      }
+
       await approvalService.ensureApprovalTask(
         timesheetId,
-        Number(p.ProjectId),
+        projectId,
         Number(defaultApprover.UserId)
       );
     }
 
+    /*
+     * Reopen rejected approval tasks during resubmission.
+     */
     if (String(header.Status) === "Rejected") {
-      await approvalService.reopenApprovalsForResubmission(timesheetId);
+      await approvalService.reopenApprovalsForResubmission(
+        timesheetId
+      );
     }
 
     await timesheetService.markSubmitted(timesheetId);
-    await timesheetService.addAudit(timesheetId, req.user.UserId, "Submitted");
 
-    return res.json({ ok: true });
+    await timesheetService.addAudit(
+      timesheetId,
+      req.user.UserId,
+      "Submitted"
+    );
+
+    return res.json({
+      ok: true
+    });
   } catch (err) {
     console.error("submitTimesheet failed:", err);
-    return fail(500, err?.message || "Submit failed");
+
+    return fail(
+      500,
+      err?.message || "Submit failed"
+    );
   }
 }
+
 
 async function replyToRejection(req, res) {
   const timesheetId = Number(req.params.id);
