@@ -53,7 +53,7 @@ async function getApproversBySubTeam(subTeamId) {
         DisplayName
       FROM dbo.Users
       WHERE LOWER(LTRIM(RTRIM(Role))) = 'approver'
-        AND SubTeamId = @SubTeamId
+        -- AND SubTeamId = @SubTeamId
         AND ISNULL(IsActive, 1) = 1
       ORDER BY DisplayName, Email
     `);
@@ -91,13 +91,13 @@ async function addMapping({ projectId, teamId, subTeamId, approverEmail, isPrima
   const subTeamCheck = validation.recordsets[0] || [];
   const approverCheck = validation.recordsets[1] || [];
 
-  if (!subTeamCheck.length) {
+  /*if (!subTeamCheck.length) {
     throw new Error("Selected SubTeam does not belong to selected Team.");
   }
 
   if (!approverCheck.length) {
     throw new Error("Selected approver does not belong to selected SubTeam.");
-  }
+  }*/
 
   const exists = await pool.request()
     .input("ProjectId", sql.Int, Number(projectId))
